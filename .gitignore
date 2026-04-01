@@ -1,0 +1,11 @@
+node_modules/
+.svelte-kit/
+build/
+.DS_Store
+Icon\r
+.cplan/
+src-tauri/target/
+src-tauri/gen/
+*.swp
+*.swo
+.env

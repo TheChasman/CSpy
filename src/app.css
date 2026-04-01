@@ -1,0 +1,60 @@
+:root {
+	--bg: #1e1e2e;
+	--bg-surface: #292940;
+	--text: #e0e0e8;
+	--text-dim: #8888a0;
+	--green: #4ade80;
+	--amber: #fbbf24;
+	--red: #f87171;
+	--bar-bg: #3a3a50;
+	--radius: 8px;
+	--font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+	--font-mono: 'SF Mono', 'JetBrains Mono', monospace;
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html, body {
+	font-family: var(--font);
+	font-size: 13px;
+	color: var(--text);
+	background: var(--bg);
+	overflow: hidden;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+body {
+	padding: 12px;
+}
+
+.mono {
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+.dim {
+	color: var(--text-dim);
+}
+
+/* Progress bar */
+.bar-track {
+	height: 8px;
+	background: var(--bar-bg);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.bar-fill {
+	height: 100%;
+	border-radius: 4px;
+	transition: width 0.6s ease, background-color 0.4s ease;
+}
+
+.bar-fill.green  { background: var(--green); }
+.bar-fill.amber  { background: var(--amber); }
+.bar-fill.red    { background: var(--red); }
