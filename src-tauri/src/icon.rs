@@ -18,8 +18,8 @@ pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
         (74, 222, 128) // Green: #4ade80
     };
 
-    // Outline is always dark (assume light macOS mode for now; can add dark mode detection later)
-    let outline_color = (0, 0, 0); // Black
+    // Outline colour - white for contrast on dark menu bar, black for dark mode (fixed to white for now)
+    let outline_color = (255, 255, 255); // White for visibility
 
     // Calculate fill width (0-14 pixels, leaving 1px border on each side)
     let inner_width = WIDTH - 2 * BORDER;
@@ -33,7 +33,7 @@ pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
             let pixel_idx = ((y * WIDTH + x) * 4) as usize;
 
             let (r, g, b, a) = if y < BORDER || y >= HEIGHT - BORDER || x < BORDER || x >= WIDTH - BORDER {
-                // Outline: black with full alpha
+                // Outline: white with full alpha for visibility
                 (outline_color.0, outline_color.1, outline_color.2, 255)
             } else {
                 // Interior: determine if this pixel is filled or hollow
@@ -42,8 +42,8 @@ pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
                     // Filled region: use fill colour
                     (fill_color.0, fill_color.1, fill_color.2, 255)
                 } else {
-                    // Hollow region: transparent white (for clean look)
-                    (255, 255, 255, 0)
+                    // Hollow region: light grey background so the empty region is visible
+                    (230, 230, 230, 255)
                 }
             };
 
