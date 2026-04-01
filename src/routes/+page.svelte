@@ -2,12 +2,13 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-	import { type UsageData, type Tier, tierFor, formatCountdown } from '$lib/types';
+	import { type UsageData, type Tier, tierFor, burnRateTier, calculateBurnRate, formatCountdown } from '$lib/types';
 
 	let usage: UsageData | null = $state(null);
 	let error: string | null = $state(null);
 	let loading = $state(true);
 	let countdownKey = $state(0); // forces countdown re-render
+	let burnRate = $state(0); // %/hr
 
 	let unlisten: UnlistenFn | undefined;
 	let ticker: ReturnType<typeof setInterval> | undefined;
@@ -18,6 +19,12 @@
 			usage = event.payload;
 			error = null;
 			loading = false;
+			// Recalculate burn rate from new data
+			if (usage?.five_hour?.resets_at) {
+				const resetTime = new Date(usage.five_hour.resets_at).getTime();
+				const secondsUntilReset = Math.max(0, (resetTime - Date.now()) / 1000);
+				burnRate = calculateBurnRate(usage.five_hour?.utilisation ?? 0, secondsUntilReset);
+			}
 		});
 
 		// Listen for errors
@@ -27,12 +34,25 @@
 		});
 
 		// Tick countdowns every 30s
-		ticker = setInterval(() => { countdownKey++; }, 30_000);
+		ticker = setInterval(() => {
+			countdownKey++;
+			// Recalculate burn rate as time passes
+			if (usage?.five_hour?.resets_at) {
+				const resetTime = new Date(usage.five_hour.resets_at).getTime();
+				const secondsUntilReset = Math.max(0, (resetTime - Date.now()) / 1000);
+				burnRate = calculateBurnRate(usage.five_hour?.utilisation ?? 0, secondsUntilReset);
+			}
+		}, 30_000);
 
 		// Request immediate fetch
 		try {
 			usage = await invoke<UsageData>('get_usage');
 			loading = false;
+			if (usage?.five_hour?.resets_at) {
+				const resetTime = new Date(usage.five_hour.resets_at).getTime();
+				const secondsUntilReset = Math.max(0, (resetTime - Date.now()) / 1000);
+				burnRate = calculateBurnRate(usage.five_hour?.utilisation ?? 0, secondsUntilReset);
+			}
 		} catch (e) {
 			error = String(e);
 			loading = false;
@@ -84,10 +104,10 @@
 		</div>
 	{:else if usage}
 		{#key countdownKey}
-			<!-- 5-hour window -->
+			<!-- 5-hour window only -->
 			<section class="bucket">
 				<div class="bucket-header">
-					<span class="bucket-label">5-hour</span>
+					<span class="bucket-label">5-hour quota</span>
 					<span class="mono {tier(usage.five_hour?.utilisation ?? 0)}">
 						{pct(usage.five_hour?.utilisation ?? 0)}
 					</span>
@@ -103,22 +123,12 @@
 				</div>
 			</section>
 
-			<!-- 7-day window -->
-			<section class="bucket">
-				<div class="bucket-header">
-					<span class="bucket-label">Weekly</span>
-					<span class="mono {tier(usage.seven_day?.utilisation ?? 0)}">
-						{pct(usage.seven_day?.utilisation ?? 0)}
-					</span>
-				</div>
-				<div class="bar-track">
-					<div
-						class="bar-fill {tier(usage.seven_day?.utilisation ?? 0)}"
-						style="width: {pct(usage.seven_day?.utilisation ?? 0)}"
-					></div>
-				</div>
-				<div class="bucket-footer dim mono">
-					Resets in {formatCountdown(usage.seven_day?.resets_at ?? null)}
+			<!-- Burn rate indicator -->
+			<section class="burn-rate">
+				<div class="burn-rate-label">Burn rate</div>
+				<div class="burn-rate-display">
+					<span class="burn-rate-value">{burnRate.toFixed(1)}%/hr</span>
+					<span class="burn-rate-dot {burnRateTier(burnRate)}"></span>
 				</div>
 			</section>
 		{/key}
@@ -234,4 +244,43 @@
 	.green { color: var(--green); }
 	.amber { color: var(--amber); }
 	.red   { color: var(--red); }
+
+	.burn-rate {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 8px 0;
+		font-size: 12px;
+		border-top: 1px solid var(--bar-bg);
+	}
+
+	.burn-rate-label {
+		color: var(--text-dim);
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.burn-rate-display {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+	}
+
+	.burn-rate-value {
+		color: var(--text);
+		font-family: var(--font-mono);
+		font-size: 11px;
+	}
+
+	.burn-rate-dot {
+		display: inline-block;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+	}
+
+	.burn-rate-dot.green { background: var(--green); }
+	.burn-rate-dot.amber { background: var(--amber); }
+	.burn-rate-dot.red { background: var(--red); }
 </style>
