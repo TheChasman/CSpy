@@ -16,9 +16,24 @@ export interface UsageBucket {
 export type Tier = 'green' | 'amber' | 'red';
 
 export function tierFor(utilisation: number): Tier {
-	if (utilisation >= 0.85) return 'red';
-	if (utilisation >= 0.60) return 'amber';
+	if (utilisation >= 0.90) return 'red';
+	if (utilisation >= 0.70) return 'amber';
 	return 'green';
+}
+
+/** Colour tier for burn rate (%/hr) */
+export function burnRateTier(burnRatePercent: number): Tier {
+	if (burnRatePercent >= 20) return 'red';
+	if (burnRatePercent >= 16) return 'amber';
+	return 'green';
+}
+
+/** Calculate burn rate in percentage per hour */
+export function calculateBurnRate(utilisation: number, secondsUntilReset: number): number {
+	if (secondsUntilReset <= 0) return 0;
+	const hoursRemaining = secondsUntilReset / 3600;
+	const usagePercent = utilisation * 100;
+	return usagePercent / hoursRemaining;
 }
 
 /** Format seconds remaining as "Xh Ym" */
