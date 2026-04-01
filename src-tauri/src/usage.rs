@@ -60,11 +60,11 @@ pub async fn fetch_usage(token: &str) -> Result<UsageData, String> {
 
     Ok(UsageData {
         five_hour: api.five_hour.map(|b| UsageBucket {
-            utilisation: b.utilization,
+            utilisation: b.utilization / 100.0, // API returns 0-100, normalise to 0.0-1.0
             resets_at: b.resets_at,
         }),
         seven_day: api.seven_day.map(|b| UsageBucket {
-            utilisation: b.utilization,
+            utilisation: b.utilization / 100.0,
             resets_at: b.resets_at,
         }),
         fetched_at: now,
