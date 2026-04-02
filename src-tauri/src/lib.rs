@@ -33,9 +33,21 @@ async fn get_usage(state: State<'_, Arc<AppState>>) -> Result<UsageData, String>
 async fn refresh_usage(state: State<'_, Arc<AppState>>) -> Result<UsageData, String> {
     log::info!("refresh_usage called from frontend");
     let token = ensure_token(&state).await?;
-    let data = usage::fetch_usage(&token).await?;
-    *state.cached.write().await = Some(data.clone());
-    Ok(data)
+    match usage::fetch_usage(&token).await {
+        Ok(data) => {
+            *state.cached.write().await = Some(data.clone());
+            Ok(data)
+        }
+        Err(e) if e == "rate_limited" => {
+            // Return cached data on 429 — don't surface as error
+            if let Some(ref data) = *state.cached.read().await {
+                Ok(data.clone())
+            } else {
+                Err("Rate limited and no cached data available".into())
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 async fn ensure_token(state: &AppState) -> Result<String, String> {

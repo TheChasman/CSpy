@@ -20,7 +20,7 @@
 
 html, body {
 	font-family: var(--font);
-	font-size: 15px;
+	font-size: 17px;
 	color: var(--text);
 	background: var(--bg);
 	overflow: hidden;
@@ -34,7 +34,7 @@ body {
 
 .mono {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: 13px;
 }
 
 .dim {

@@ -163,7 +163,7 @@
 
 	.title {
 		font-weight: 700;
-		font-size: 15px;
+		font-size: 17px;
 		letter-spacing: -0.3px;
 	}
 
@@ -202,14 +202,14 @@
 
 	.bucket-label {
 		font-weight: 600;
-		font-size: 12px;
+		font-size: 14px;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
 		color: var(--text-dim);
 	}
 
 	.bucket-footer {
-		font-size: 11px;
+		font-size: 15px;
 	}
 
 	.error-box {
@@ -217,7 +217,7 @@
 		border: 1px solid rgba(248, 113, 113, 0.3);
 		border-radius: var(--radius);
 		padding: 8px 10px;
-		font-size: 12px;
+		font-size: 14px;
 		display: flex;
 		gap: 6px;
 		align-items: flex-start;
@@ -225,7 +225,7 @@
 	.error-icon { flex-shrink: 0; }
 
 	.stale-warning {
-		font-size: 11px;
+		font-size: 13px;
 		color: var(--amber);
 	}
 
@@ -237,7 +237,7 @@
 
 	footer {
 		text-align: right;
-		font-size: 10px;
+		font-size: 14px;
 	}
 
 	/* Colour utility classes for text */
@@ -250,7 +250,7 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 8px 0;
-		font-size: 12px;
+		font-size: 14px;
 		border-top: 1px solid var(--bar-bg);
 	}
 
@@ -270,7 +270,7 @@
 	.burn-rate-value {
 		color: var(--text);
 		font-family: var(--font-mono);
-		font-size: 11px;
+		font-size: 13px;
 	}
 
 	.burn-rate-dot {
