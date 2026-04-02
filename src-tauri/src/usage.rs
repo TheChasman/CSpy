@@ -33,6 +33,14 @@ pub struct UsageBucket {
 
 /// Fetch current usage from the Anthropic OAuth endpoint.
 pub async fn fetch_usage(token: &str) -> Result<UsageData, String> {
+    // Small random jitter (50–250ms) to avoid clustering with other callers sharing this token
+    let jitter = std::time::Duration::from_millis(50 + (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_millis() as u64 % 200));
+    tokio::time::sleep(jitter).await;
+
+    log::info!("API request → {} (after {}ms jitter)", USAGE_URL, jitter.as_millis());
     let client = reqwest::Client::new();
 
     let resp = client
@@ -45,8 +53,12 @@ pub async fn fetch_usage(token: &str) -> Result<UsageData, String> {
         .await
         .map_err(|e| format!("HTTP request failed: {e}"))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let status = resp.status();
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        log::warn!("API rate limited (429) — will use cached data");
+        return Err("rate_limited".into());
+    }
+    if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("API returned {status}: {body}"));
     }

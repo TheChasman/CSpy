@@ -26,11 +26,12 @@ async fn get_usage(state: State<'_, Arc<AppState>>) -> Result<UsageData, String>
     if let Some(ref data) = *state.cached.read().await {
         return Ok(data.clone());
     }
-    refresh_usage(state).await
+    Err("No cached data yet — waiting for first poll".into())
 }
 
 #[tauri::command]
 async fn refresh_usage(state: State<'_, Arc<AppState>>) -> Result<UsageData, String> {
+    log::info!("refresh_usage called from frontend");
     let token = ensure_token(&state).await?;
     let data = usage::fetch_usage(&token).await?;
     *state.cached.write().await = Some(data.clone());
@@ -83,6 +84,9 @@ fn toggle_popover(window: &WebviewWindow, x: f64, y: f64) {
 
 fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
+        // Sleep first — the immediate fetch in setup handles the first request
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_SECS)).await;
+
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(POLL_SECS));
 
         loop {
@@ -110,6 +114,10 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
                     update_tray_tooltip(&app_handle, &data);
                     *state.cached.write().await = Some(data.clone());
                     let _ = app_handle.emit("usage-updated", &data);
+                }
+                Err(e) if e == "rate_limited" => {
+                    // 429 is quiet — keep cached data, try again next poll
+                    log::info!("Rate limited, will retry in {}s", POLL_SECS);
                 }
                 Err(e) => {
                     log::error!("Poll failed: {e}");
@@ -208,6 +216,9 @@ pub fn run() {
                             update_tray_tooltip(&h, &data);
                             *s.cached.write().await = Some(data.clone());
                             let _ = h.emit("usage-updated", &data);
+                        }
+                        Err(e) if e == "rate_limited" => {
+                            log::info!("Initial fetch rate limited — will get data on next poll");
                         }
                         Err(e) => {
                             log::error!("Initial fetch failed: {e}");
