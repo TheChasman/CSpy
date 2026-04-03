@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/TheChasman/CSpy/compare/v0.2.2...v0.2.3) (2026-04-03)
+
+
+### Bug Fixes
+
+* enable v1Compatible updater artefacts for latest.json generation ([c7daed5](https://github.com/TheChasman/CSpy/commit/c7daed55b2faf4a1c0976634614706e1aead63e7))
+
 ## [0.2.2](https://github.com/TheChasman/CSpy/compare/v0.2.1...v0.2.2) (2026-04-03)
 
 
