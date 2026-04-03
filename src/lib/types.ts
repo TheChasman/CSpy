@@ -2,6 +2,9 @@
 export interface UsageData {
 	five_hour: UsageBucket | null;
 	seven_day: UsageBucket | null;
+	monthly_spend_limit: UsageBucket | null;
+	current_balance: number | null;
+	auto_reload_enabled: boolean;
 	fetched_at: string;
 }
 

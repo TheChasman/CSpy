@@ -16,7 +16,7 @@
         "label": "popover",
         "title": "CSpy",
         "width": 290,
-        "height": 240,
+        "height": 360,
         "resizable": false,
         "visible": false,
         "decorations": false,

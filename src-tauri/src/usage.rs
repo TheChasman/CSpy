@@ -9,6 +9,12 @@ const BETA_HEADER: &str = "oauth-2025-04-20";
 struct ApiResponse {
     five_hour: Option<ApiBucket>,
     seven_day: Option<ApiBucket>,
+    #[serde(default)]
+    monthly_spend_limit: Option<ApiBucket>,
+    #[serde(default)]
+    current_balance: Option<f64>,
+    #[serde(default)]
+    auto_reload_enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -22,6 +28,9 @@ struct ApiBucket {
 pub struct UsageData {
     pub five_hour: Option<UsageBucket>,
     pub seven_day: Option<UsageBucket>,
+    pub monthly_spend_limit: Option<UsageBucket>,
+    pub current_balance: Option<f64>,
+    pub auto_reload_enabled: bool,
     pub fetched_at: String,
 }
 
@@ -86,6 +95,12 @@ pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageD
             utilisation: b.utilization / 100.0,
             resets_at: b.resets_at,
         }),
+        monthly_spend_limit: api.monthly_spend_limit.map(|b| UsageBucket {
+            utilisation: b.utilization / 100.0,
+            resets_at: b.resets_at,
+        }),
+        current_balance: api.current_balance,
+        auto_reload_enabled: api.auto_reload_enabled,
         fetched_at: now,
     })
 }

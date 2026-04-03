@@ -133,6 +133,43 @@
 					<span class="burn-rate-dot {burnRateTier(burnRate)}"></span>
 				</div>
 			</section>
+
+			<!-- Monthly spend limit -->
+			{#if usage.monthly_spend_limit}
+				<section class="bucket">
+					<div class="bucket-header">
+						<span class="bucket-label">Monthly limit</span>
+						<span class="mono {tier(usage.monthly_spend_limit?.utilisation ?? 0)}">
+							{pct(usage.monthly_spend_limit?.utilisation ?? 0)}
+						</span>
+					</div>
+					<div class="bar-track">
+						<div
+							class="bar-fill {tier(usage.monthly_spend_limit?.utilisation ?? 0)}"
+							style="width: {pct(usage.monthly_spend_limit?.utilisation ?? 0)}"
+						></div>
+					</div>
+					<div class="bucket-footer dim mono">
+						Resets in {formatCountdown(usage.monthly_spend_limit?.resets_at ?? null)}
+					</div>
+				</section>
+			{/if}
+
+			<!-- Balance and auto-reload -->
+			<section class="account-info">
+				{#if usage.current_balance !== null && usage.current_balance !== undefined}
+					<div class="balance-row">
+						<span class="label dim">Balance</span>
+						<span class="value mono">${usage.current_balance.toFixed(2)}</span>
+					</div>
+				{/if}
+				<div class="auto-reload-row">
+					<span class="label dim">Auto-reload</span>
+					<span class="auto-reload-badge {usage.auto_reload_enabled ? 'enabled' : 'disabled'}">
+						{usage.auto_reload_enabled ? 'ON' : 'OFF'}
+					</span>
+				</div>
+			</section>
 		{/key}
 
 		{#if error}
@@ -285,4 +322,55 @@
 	.burn-rate-dot.green { background: var(--green); }
 	.burn-rate-dot.amber { background: var(--amber); }
 	.burn-rate-dot.red { background: var(--red); }
+
+	.account-info {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 8px 0;
+		border-top: 1px solid var(--bar-bg);
+		font-size: 14px;
+	}
+
+	.balance-row,
+	.auto-reload-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.label {
+		color: var(--text-dim);
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		font-size: 13px;
+	}
+
+	.value {
+		color: var(--text);
+		font-size: 14px;
+	}
+
+	.auto-reload-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 32px;
+		height: 20px;
+		border-radius: 4px;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.3px;
+	}
+
+	.auto-reload-badge.enabled {
+		background: rgba(248, 113, 113, 0.2);
+		color: var(--red);
+	}
+
+	.auto-reload-badge.disabled {
+		background: rgba(74, 222, 128, 0.2);
+		color: var(--green);
+	}
 </style>
