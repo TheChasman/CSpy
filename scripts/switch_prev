@@ -23,6 +23,8 @@ cargo tauri build --config tauri.preview.conf.json
 
 # Kill everything immediately before launching — catches anything that respawned during the build
 echo "Killing all instances..."
+pkill -x "${APP}" 2>/dev/null || true
+pkill -x "${APP_LOWER}" 2>/dev/null || true
 pkill -f "Contents/MacOS/${APP}" 2>/dev/null || true
 pkill -f "target/debug/${APP_LOWER}" 2>/dev/null || true
 pkill -f "target/release/bundle/macos/${APP}" 2>/dev/null || true

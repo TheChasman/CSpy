@@ -18,6 +18,8 @@ launchctl bootout "gui/$(id -u)" "${PLIST}" 2>/dev/null || true
 #   - cargo tauri dev     → the watcher process itself
 #   - vite                → frontend dev server
 echo "Killing all instances..."
+pkill -x "${APP}" 2>/dev/null || true           # exact name match (open-launched)
+pkill -x "${APP_LOWER}" 2>/dev/null || true     # exact name match (debug binary)
 pkill -f "Contents/MacOS/${APP}" 2>/dev/null || true
 pkill -f "target/debug/${APP_LOWER}" 2>/dev/null || true
 pkill -f "target/release/bundle/macos/${APP}" 2>/dev/null || true
