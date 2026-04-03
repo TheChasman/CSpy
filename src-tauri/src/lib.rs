@@ -3,6 +3,7 @@ mod usage;
 mod icon;
 
 use std::sync::Arc;
+use chrono::Timelike;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, State, WebviewWindow,
@@ -94,6 +95,12 @@ fn toggle_popover(window: &WebviewWindow, x: f64, y: f64) {
 
 // ── Background polling loop ──────────────────────────────────
 
+/// Returns true if current local time is within quiet hours (23:00–08:00).
+fn is_quiet_hours() -> bool {
+    let hour = chrono::Local::now().hour();
+    hour >= 23 || hour < 8
+}
+
 fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         // Sleep first — the immediate fetch in setup handles the first request
@@ -103,6 +110,11 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
 
         loop {
             interval.tick().await;
+
+            if is_quiet_hours() {
+                log::info!("Quiet hours (23:00–08:00) — skipping poll");
+                continue;
+            }
 
             let token = match ensure_token(&state).await {
                 Ok(t) => t,
@@ -128,8 +140,9 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
                     let _ = app_handle.emit("usage-updated", &data);
                 }
                 Err(e) if e == "rate_limited" => {
-                    // 429 is quiet — keep cached data, try again next poll
-                    log::info!("Rate limited, will retry in {}s", POLL_SECS);
+                    // 429 might mean stale token — clear it so we re-read Keychain next poll
+                    *state.token.write().await = None;
+                    log::info!("Rate limited, cleared cached token, will retry in {}s", POLL_SECS);
                 }
                 Err(e) => {
                     log::error!("Poll failed: {e}");
@@ -230,7 +243,8 @@ pub fn run() {
                             let _ = h.emit("usage-updated", &data);
                         }
                         Err(e) if e == "rate_limited" => {
-                            log::info!("Initial fetch rate limited — will get data on next poll");
+                            *s.token.write().await = None;
+                            log::info!("Initial fetch rate limited — cleared token, will retry on next poll");
                         }
                         Err(e) => {
                             log::error!("Initial fetch failed: {e}");
