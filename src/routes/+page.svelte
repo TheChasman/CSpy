@@ -152,7 +152,14 @@
 				Updated {new Date(usage.fetched_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
 			{/if}
 		</div>
-		<div class="footer-right">v{version}</div>
+		<div class="footer-right">
+			{#if import.meta.env.DEV}
+				<span class="env-badge dev">DEV</span>
+			{:else if import.meta.env.MODE === 'preview'}
+				<span class="env-badge prev">PREV</span>
+			{/if}
+			v{version}
+		</div>
 	</footer>
 </div>
 
@@ -261,7 +268,20 @@
 		flex-shrink: 0;
 		color: var(--text-dim);
 		letter-spacing: 0.3px;
+		display: flex;
+		align-items: center;
+		gap: 5px;
 	}
+
+	.env-badge {
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+		padding: 1px 4px;
+		border-radius: 3px;
+	}
+	.env-badge.dev  { background: rgba(99, 102, 241, 0.2); color: #818cf8; }
+	.env-badge.prev { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
 
 	/* Colour utility classes for text */
 	.green { color: var(--green); }
