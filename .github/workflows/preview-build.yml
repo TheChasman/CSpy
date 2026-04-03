@@ -1,0 +1,42 @@
+name: Preview Build
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - run: npm ci
+
+      - name: Build preview
+        run: cargo tauri build --config tauri.preview.conf.json
+        working-directory: src-tauri
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSpy-preview-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 7

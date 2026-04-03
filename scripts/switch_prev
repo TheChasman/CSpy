@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# switch_prev — build a preview binary (PREV badge) and run it directly, no launchd
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+LABEL="$(sed -n 's/^LABEL="\([^"]*\)".*/\1/p' "$ROOT/install.sh")"
+APP="$(python3 -c "import json; print(json.load(open('$ROOT/src-tauri/tauri.conf.json'))['productName'])")"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+
+echo "→ Stopping production agent ($LABEL)…"
+launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null \
+  && echo "  Stopped." \
+  || echo "  Not running — continuing."
+
+echo "→ Killing any running dev processes…"
+pkill -f "cargo tauri dev" 2>/dev/null || true
+pkill -f "cargo-watch" 2>/dev/null || true
+
+echo "→ Building preview binary (this takes a few minutes)…"
+cd "$ROOT/src-tauri"
+cargo tauri build --config tauri.preview.conf.json
+
+echo "→ Launching $APP in preview mode…"
+open "$ROOT/src-tauri/target/release/bundle/macos/$APP.app"
+echo "  Running — look for PREV badge in the popover."

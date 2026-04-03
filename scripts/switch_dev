@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# switch_dev — stop the launchd agent and start Tauri hot-reload dev mode
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+LABEL="$(sed -n 's/^LABEL="\([^"]*\)".*/\1/p' "$ROOT/install.sh")"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+
+echo "→ Stopping production agent ($LABEL)…"
+launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null \
+  && echo "  Stopped." \
+  || echo "  Not running — continuing."
+
+echo "→ Starting dev mode (Vite + cargo-watch)…"
+cd "$ROOT"
+exec cargo tauri dev
