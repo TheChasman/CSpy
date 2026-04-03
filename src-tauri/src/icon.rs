@@ -61,7 +61,7 @@ pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
             let (r, g, b, a) = if y < inner_top || y >= inner_bottom {
                 // Above/below the bar — fully transparent
                 (0, 0, 0, 0)
-            } else if x < inner_left || x >= inner_right
+            } else if x < inner_left + BORDER || x >= inner_right - BORDER
                 || y < inner_top + BORDER || y >= inner_bottom - BORDER {
                 // Border region
                 (outline_color.0, outline_color.1, outline_color.2, 255)
