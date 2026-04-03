@@ -26,11 +26,10 @@ fi
 
 echo "Installing ${APP_NAME} to ${INSTALL_DIR}..."
 rm -rf "${APP_DST}"
-cp -R "${APP_SRC}" "${APP_DST}"
-
-# Strip provenance from all files in the bundle
-xattr -cr "${APP_DST}" 2>/dev/null
-echo "Stripped extended attributes from ${APP_DST}"
+# ditto --noextattr strips com.apple.provenance and all other xattrs on copy,
+# so launchd can bootstrap the binary regardless of which terminal runs this script.
+ditto --noextattr "${APP_SRC}" "${APP_DST}"
+echo "Installed ${APP_NAME} (xattr-clean)"
 
 # ── Generate launchd plist (heredoc — no provenance) ──────────
 
