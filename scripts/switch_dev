@@ -28,6 +28,10 @@ fi
 
 sleep 1
 
+LOG="${HOME}/Library/Logs/cspy-dev.log"
 echo "Starting dev mode (Vite + cargo tauri dev)..."
+echo "  Logs: ${LOG}"
 cd "${ROOT}"
-exec cargo tauri dev
+nohup cargo tauri dev > "${LOG}" 2>&1 &
+disown
+echo "  PID $! — use 'switch_prod' or 'switch_prev' to stop."
