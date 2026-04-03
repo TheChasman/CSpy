@@ -1,9 +1,8 @@
 name: Build and Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -47,8 +46,8 @@ jobs:
           # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'CSpy ${{ github.ref_name }}'
+          tagName: ${{ github.event.release.tag_name }}
+          releaseName: 'CSpy ${{ github.event.release.tag_name }}'
           releaseBody: 'See CHANGELOG.md for details.'
           releaseDraft: false
           prerelease: false
