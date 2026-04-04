@@ -30,10 +30,12 @@ export function burnRateTier(burnRatePercent: number): Tier {
 
 /** Calculate burn rate in percentage per hour */
 export function calculateBurnRate(utilisation: number, secondsUntilReset: number): number {
-	if (secondsUntilReset <= 0) return 0;
-	const hoursRemaining = secondsUntilReset / 3600;
+	const WINDOW_SECONDS = 5 * 3600; // 5-hour rolling window
+	const elapsedSeconds = WINDOW_SECONDS - secondsUntilReset;
+	if (elapsedSeconds <= 60) return 0; // not enough elapsed time to be meaningful
+	const hoursElapsed = elapsedSeconds / 3600;
 	const usagePercent = utilisation * 100;
-	return usagePercent / hoursRemaining;
+	return usagePercent / hoursElapsed;
 }
 
 /** Format seconds remaining as "Xh Ym" */
