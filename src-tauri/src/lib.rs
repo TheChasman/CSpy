@@ -212,6 +212,7 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
                         }
 
                         update_tray_tooltip(&app_handle, &data);
+                        update_tray_title(&app_handle, &data);
                         *state.cached.write().await = Some(data.clone());
                         let _ = app_handle.emit("usage-updated", &data);
                     }
@@ -251,6 +252,18 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
             }
 
             tokio::time::sleep(std::time::Duration::from_secs(next_sleep)).await;
+        }
+    });
+}
+
+/// Tick every 60 seconds to update the tray countdown without a fresh API fetch.
+fn start_countdown_ticker(app_handle: tauri::AppHandle, state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if let Some(data) = state.cached.read().await.as_ref() {
+                update_tray_title(&app_handle, data);
+            }
         }
     });
 }
@@ -316,6 +329,35 @@ fn start_update_checker(app_handle: tauri::AppHandle, state: Arc<AppState>) {
             tokio::time::sleep(std::time::Duration::from_secs(UPDATE_CHECK_SECS)).await;
         }
     });
+}
+
+/// Format remaining time until `resets_at` as "Xh Ym", "Ym", or "0m".
+fn format_countdown(resets_at: &str) -> String {
+    let Ok(reset) = chrono::DateTime::parse_from_rfc3339(resets_at) else {
+        return "—".into();
+    };
+    let total_mins = reset.signed_duration_since(chrono::Utc::now()).num_minutes();
+    if total_mins <= 0 {
+        return "0m".into();
+    }
+    let hours = total_mins / 60;
+    let mins = total_mins % 60;
+    if hours > 0 {
+        format!("{hours}h {mins}m")
+    } else {
+        format!("{mins}m")
+    }
+}
+
+/// Set the tray icon title (text to the right of the icon) to the 5-hour countdown.
+fn update_tray_title(app: &tauri::AppHandle, data: &UsageData) {
+    let label = data.five_hour.as_ref()
+        .and_then(|b| b.resets_at.as_deref())
+        .map(format_countdown)
+        .unwrap_or_else(|| "—".into());
+    if let Some(tray) = app.tray_by_id("cspy-tray") {
+        let _ = tray.set_title(Some(label.as_str()));
+    }
 }
 
 fn update_tray_tooltip(app: &tauri::AppHandle, data: &UsageData) {
@@ -394,6 +436,9 @@ pub fn run() {
             // Start background polling
             start_polling(handle, state.clone());
 
+            // Start 1-minute countdown ticker for tray title
+            start_countdown_ticker(app.handle().clone(), state.clone());
+
             // Start background update checker
             start_update_checker(app.handle().clone(), state.clone());
 
@@ -413,6 +458,7 @@ pub fn run() {
                             }
 
                             update_tray_tooltip(&h, &data);
+                            update_tray_title(&h, &data);
                             *s.cached.write().await = Some(data.clone());
                             let _ = h.emit("usage-updated", &data);
                         }
