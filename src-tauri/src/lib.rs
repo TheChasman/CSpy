@@ -337,6 +337,121 @@ fn start_countdown_ticker(app_handle: tauri::AppHandle, state: Arc<AppState>) {
     });
 }
 
+fn start_watchdog(app_handle: tauri::AppHandle, state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        // Wait for the grace period before starting health checks
+        tokio::time::sleep(std::time::Duration::from_secs(HEARTBEAT_GRACE_SECS + 5)).await;
+
+        let mut reload_count: u32 = 0;
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_TICK_SECS)).await;
+
+            let last = *state.last_heartbeat.read().await;
+            let startup = state.startup_time.get().copied().unwrap_or_else(std::time::Instant::now);
+            let healthy = is_frontend_healthy(
+                last,
+                startup,
+                std::time::Instant::now(),
+                HEARTBEAT_GRACE_SECS,
+                HEARTBEAT_THRESHOLD_SECS,
+            );
+
+            if healthy {
+                if reload_count > 0 {
+                    log::info!("Watchdog: frontend recovered after {} reload(s)", reload_count);
+                    reload_count = 0;
+                }
+                continue;
+            }
+
+            reload_count += 1;
+            log::warn!("Watchdog: frontend heartbeat timeout — recovery attempt {}", reload_count);
+
+            // Dev: ensure Vite is running before attempting WebView reload
+            #[cfg(debug_assertions)]
+            ensure_vite_running(&state);
+
+            // Reload the WebView
+            if let Some(win) = app_handle.get_webview_window("popover") {
+                let _ = win.eval("window.location.reload()");
+                log::info!("Watchdog: triggered WebView reload");
+            }
+
+            // After two failed reloads, emit a notification in production
+            if reload_count >= 2 {
+                log::error!("Watchdog: frontend still unresponsive after {} reloads", reload_count);
+                #[cfg(not(debug_assertions))]
+                {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = app_handle
+                        .notification()
+                        .builder()
+                        .title("CSpy")
+                        .body("Popover unresponsive — restart CSpy to recover")
+                        .show();
+                }
+                reload_count = 0;
+            }
+
+            // Clear heartbeat and sleep for threshold duration so next check
+            // uses only real post-recovery heartbeats
+            *state.last_heartbeat.write().await = None;
+            tokio::time::sleep(std::time::Duration::from_secs(HEARTBEAT_THRESHOLD_SECS)).await;
+        }
+    });
+}
+
+/// Ensures the Vite dev server is running on port 1420.
+/// If it is not responding, spawns `npm run dev` from the project root
+/// and waits up to 15 seconds for the port to open.
+/// No-op in release builds.
+#[cfg(debug_assertions)]
+fn ensure_vite_running(state: &Arc<AppState>) {
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    const PROJECT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let addr = "127.0.0.1:1420";
+
+    // Check if Vite is already up
+    if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(300)).is_ok() {
+        return; // already running
+    }
+
+    log::warn!("Watchdog: Vite not responding on :1420 — spawning npm run dev");
+
+    match std::process::Command::new("npm")
+        .args(["run", "dev"])
+        .current_dir(PROJECT_ROOT)
+        .spawn()
+    {
+        Ok(child) => {
+            if let Ok(mut guard) = state.vite_child.lock() {
+                *guard = Some(child);
+            }
+        }
+        Err(e) => {
+            log::error!("Watchdog: failed to spawn npm run dev: {e}");
+            return;
+        }
+    }
+
+    // Poll until port 1420 responds, timeout 15s
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(200)).is_ok() {
+            log::info!("Watchdog: Vite is up on :1420");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            log::error!("Watchdog: Vite did not come up within 15s");
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 fn start_update_checker(app_handle: tauri::AppHandle, state: Arc<AppState>) {
     use tauri_plugin_updater::UpdaterExt;
 
