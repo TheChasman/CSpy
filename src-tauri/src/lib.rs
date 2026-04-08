@@ -348,7 +348,10 @@ fn start_watchdog(app_handle: tauri::AppHandle, state: Arc<AppState>) {
             tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_TICK_SECS)).await;
 
             let last = *state.last_heartbeat.read().await;
-            let startup = state.startup_time.get().copied().unwrap_or_else(std::time::Instant::now);
+            let Some(startup) = state.startup_time.get().copied() else {
+                log::warn!("Watchdog: startup_time not set yet — skipping check");
+                continue;
+            };
             let healthy = is_frontend_healthy(
                 last,
                 startup,
@@ -368,9 +371,16 @@ fn start_watchdog(app_handle: tauri::AppHandle, state: Arc<AppState>) {
             reload_count += 1;
             log::warn!("Watchdog: frontend heartbeat timeout — recovery attempt {}", reload_count);
 
-            // Dev: ensure Vite is running before attempting WebView reload
+            // Dev: ensure Vite is running before attempting WebView reload.
+            // Run on a blocking thread — the TCP probe and sleep loop must not
+            // block the Tokio async executor.
             #[cfg(debug_assertions)]
-            ensure_vite_running(&state);
+            {
+                let state_for_vite = state.clone();
+                tokio::task::spawn_blocking(move || ensure_vite_running(&state_for_vite))
+                    .await
+                    .ok();
+            }
 
             // Reload the WebView
             if let Some(win) = app_handle.get_webview_window("popover") {
