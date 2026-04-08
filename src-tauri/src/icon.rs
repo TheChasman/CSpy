@@ -68,7 +68,7 @@ pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
 /// Icons are cached by quantised utilisation (5% steps) so each unique level
 /// is only rendered once. The leaked buffers are bounded to ~84 KiB total.
 pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
-    let util = utilisation.max(0.0).min(1.0);
+    let util = utilisation.clamp(0.0, 1.0);
     let key = (util * 20.0).round() as u8;
 
     {

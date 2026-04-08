@@ -150,7 +150,7 @@ fn toggle_popover(window: &WebviewWindow, x: f64, y: f64) {
 
 /// Returns true if the given hour (0–23) falls within quiet hours (23:00–08:00).
 fn is_quiet_hours_at(hour: u32) -> bool {
-    hour >= 23 || hour < 8
+    !(8..23).contains(&hour)
 }
 
 /// Returns true if current local time is within quiet hours (23:00–08:00).
