@@ -32,6 +32,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Frontend build
+        run: npm run build
+
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
