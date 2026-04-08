@@ -22,8 +22,8 @@ pub struct AppState {
     pub update_pending: RwLock<bool>,
     /// Last time the frontend sent a heartbeat. None = not yet received.
     pub last_heartbeat: RwLock<Option<std::time::Instant>>,
-    /// When the app started — used for the heartbeat grace period.
-    pub startup_time: std::time::Instant,
+    /// Set inside setup() after Tauri initialises — used for the heartbeat grace period.
+    pub startup_time: std::sync::OnceLock<std::time::Instant>,
     /// Vite child process (dev builds only). Killed on app exit.
     pub vite_child: std::sync::Mutex<Option<std::process::Child>>,
 }
@@ -65,7 +65,7 @@ async fn get_usage(state: State<'_, Arc<AppState>>) -> Result<UsageData, String>
 
 /// Called by the frontend every 30s to signal it is alive.
 #[tauri::command]
-async fn heartbeat(state: State<'_, Arc<AppState>>) -> Result<(), ()> {
+async fn heartbeat(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     *state.last_heartbeat.write().await = Some(std::time::Instant::now());
     Ok(())
 }
@@ -469,7 +469,7 @@ pub fn run() {
         client,
         update_pending: RwLock::new(false),
         last_heartbeat: RwLock::new(None),
-        startup_time: std::time::Instant::now(),
+        startup_time: std::sync::OnceLock::new(),
         vite_child: std::sync::Mutex::new(None),
     });
 
@@ -485,6 +485,9 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let handle = app.handle().clone();
+
+            // Record startup time now that Tauri has initialised
+            let _ = state.startup_time.set(std::time::Instant::now());
 
             // Build system tray
             TrayIconBuilder::with_id("cspy-tray")
