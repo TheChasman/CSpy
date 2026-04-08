@@ -6,6 +6,8 @@ fn main() {
     let project_root = Path::new(&manifest_dir).parent().unwrap();
     let index_html = project_root.join("build").join("index.html");
 
+    // Rerun if this script itself changes
+    println!("cargo:rerun-if-changed=build.rs");
     // Rerun this script if build/index.html disappears
     println!("cargo:rerun-if-changed={}", index_html.display());
 
