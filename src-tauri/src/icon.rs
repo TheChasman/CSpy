@@ -44,6 +44,36 @@ fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
     }
 }
 
+/// Glyph render width at 2x scale.
+const GLYPH_RENDER_W: u32 = 10;
+/// Glyph render height at 2x scale.
+const GLYPH_RENDER_H: u32 = 14;
+/// Pixels between glyphs.
+const CHAR_GAP: u32 = 1;
+/// Pixels for a space character.
+const SPACE_WIDTH: u32 = 6;
+
+/// Calculate the total pixel width of rendered text.
+fn text_pixel_width(text: &str) -> u32 {
+    if text.is_empty() {
+        return 0;
+    }
+    let mut width: u32 = 0;
+    let mut first = true;
+    for ch in text.chars() {
+        if !first && ch != ' ' {
+            width += CHAR_GAP;
+        }
+        first = false;
+        if ch == ' ' {
+            width += SPACE_WIDTH;
+        } else {
+            width += GLYPH_RENDER_W;
+        }
+    }
+    width
+}
+
 /// Render raw RGBA bytes for a 32×32 usage icon at the given utilisation level.
 /// Pure function — no caching, no tauri dependency. Used directly by tests.
 pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
@@ -230,5 +260,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn text_width_single_digit() {
+        assert_eq!(text_pixel_width("5m"), 21);
+    }
+
+    #[test]
+    fn text_width_hours_and_mins() {
+        assert_eq!(text_pixel_width("3h 42m"), 60);
+    }
+
+    #[test]
+    fn text_width_empty() {
+        assert_eq!(text_pixel_width(""), 0);
     }
 }
