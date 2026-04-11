@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::image::Image;
 
-pub(crate) const ICON_WIDTH: u32 = 32;
+pub(crate) const BAR_WIDTH: u32 = 32;
 pub(crate) const ICON_HEIGHT: u32 = 32;
 
 /// Cache of rendered icon buffers, keyed by quantised utilisation (0–20 = 5% steps).
@@ -52,6 +52,12 @@ const GLYPH_RENDER_H: u32 = 14;
 const CHAR_GAP: u32 = 1;
 /// Pixels for a space character.
 const SPACE_WIDTH: u32 = 6;
+/// Gap between bar and text in pixels.
+const TEXT_GAP: u32 = 4;
+/// Trailing padding after text in pixels.
+const TRAIL_PAD: u32 = 2;
+/// Text colour: light grey, fully opaque.
+const TEXT_COLOUR: (u8, u8, u8, u8) = (220, 220, 220, 255);
 
 /// Calculate the total pixel width of rendered text.
 fn text_pixel_width(text: &str) -> u32 {
@@ -126,11 +132,19 @@ fn render_text_into(
     }
 }
 
-/// Render raw RGBA bytes for a 32×32 usage icon at the given utilisation level.
+/// Render raw RGBA bytes for a usage icon at the given utilisation level.
+/// Width is `BAR_WIDTH` when no countdown text is given, or wider to fit text.
 /// Pure function — no caching, no tauri dependency. Used directly by tests.
-pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
+pub(crate) fn render_icon_rgba(quantised_util: f64, countdown: Option<&str>) -> Vec<u8> {
     const BORDER: u32 = 2;
     const PADDING: u32 = 4;
+
+    let tw = countdown.map(|t| text_pixel_width(t)).unwrap_or(0);
+    let total_width = if tw > 0 {
+        BAR_WIDTH + TEXT_GAP + tw + TRAIL_PAD
+    } else {
+        BAR_WIDTH
+    };
 
     let fill_color: (u8, u8, u8) = if quantised_util >= 0.90 {
         (248, 113, 113) // Red: #f87171
@@ -143,17 +157,18 @@ pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
     let outline_color: (u8, u8, u8) = (60, 60, 60);
 
     let inner_left = BORDER;
-    let inner_right = ICON_WIDTH - BORDER;
+    let inner_right = BAR_WIDTH - BORDER;
     let inner_top = PADDING;
     let inner_bottom = ICON_HEIGHT - PADDING;
     let inner_width = inner_right - inner_left - 2 * BORDER;
     let fill_width = ((inner_width as f64 * quantised_util) as u32).min(inner_width);
 
-    let mut rgba = vec![0u8; (ICON_WIDTH * ICON_HEIGHT * 4) as usize];
+    let mut rgba = vec![0u8; (total_width * ICON_HEIGHT * 4) as usize];
 
+    // Render bar in leftmost BAR_WIDTH columns
     for y in 0..ICON_HEIGHT {
-        for x in 0..ICON_WIDTH {
-            let pixel_idx = ((y * ICON_WIDTH + x) * 4) as usize;
+        for x in 0..BAR_WIDTH {
+            let pixel_idx = ((y * total_width + x) * 4) as usize;
 
             let (r, g, b, a) = if y < inner_top || y >= inner_bottom {
                 (0, 0, 0, 0)
@@ -176,6 +191,11 @@ pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
         }
     }
 
+    // Render countdown text to the right of the bar
+    if let Some(text) = countdown {
+        render_text_into(&mut rgba, total_width, BAR_WIDTH + TEXT_GAP, text, TEXT_COLOUR);
+    }
+
     rgba
 }
 
@@ -192,12 +212,12 @@ pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
         let mut guard = ICON_CACHE.lock().unwrap();
         let cache = guard.get_or_insert_with(HashMap::new);
         if let Some(rgba_ref) = cache.get(&key) {
-            return Image::new(rgba_ref, ICON_WIDTH, ICON_HEIGHT);
+            return Image::new(rgba_ref, BAR_WIDTH, ICON_HEIGHT);
         }
     }
 
     let quantised_util = key as f64 / 20.0;
-    let rgba = render_icon_rgba(quantised_util);
+    let rgba = render_icon_rgba(quantised_util, None);
 
     let rgba_static: &'static [u8] = Box::leak(rgba.into_boxed_slice());
 
@@ -205,23 +225,23 @@ pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
     let cache = guard.get_or_insert_with(HashMap::new);
     cache.insert(key, rgba_static);
 
-    Image::new(rgba_static, ICON_WIDTH, ICON_HEIGHT)
+    Image::new(rgba_static, BAR_WIDTH, ICON_HEIGHT)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn pixel_at(rgba: &[u8], x: u32, y: u32) -> (u8, u8, u8, u8) {
-        let idx = ((y * ICON_WIDTH + x) * 4) as usize;
+    fn pixel_at(rgba: &[u8], x: u32, y: u32, row_width: u32) -> (u8, u8, u8, u8) {
+        let idx = ((y * row_width + x) * 4) as usize;
         (rgba[idx], rgba[idx + 1], rgba[idx + 2], rgba[idx + 3])
     }
 
-    fn count_interior_pixels_with_rgb(rgba: &[u8], rgb: (u8, u8, u8)) -> u32 {
+    fn count_interior_pixels_with_rgb(rgba: &[u8], rgb: (u8, u8, u8), row_width: u32) -> u32 {
         let mut count = 0;
         for y in 6..26 {
             for x in 4..28 {
-                let (r, g, b, _) = pixel_at(rgba, x, y);
+                let (r, g, b, _) = pixel_at(rgba, x, y, row_width);
                 if (r, g, b) == rgb {
                     count += 1;
                 }
@@ -232,62 +252,83 @@ mod tests {
 
     #[test]
     fn dimensions_are_32x32() {
-        let rgba = render_icon_rgba(0.5);
+        let rgba = render_icon_rgba(0.5, None);
         assert_eq!(rgba.len(), (32 * 32 * 4) as usize);
     }
 
     #[test]
     fn zero_percent_has_no_fill_pixels() {
-        let rgba = render_icon_rgba(0.0);
-        let green = count_interior_pixels_with_rgb(&rgba, (74, 222, 128));
+        let rgba = render_icon_rgba(0.0, None);
+        let green = count_interior_pixels_with_rgb(&rgba, (74, 222, 128), BAR_WIDTH);
         assert_eq!(green, 0, "0% should have no green fill pixels");
     }
 
     #[test]
     fn fifty_percent_uses_green() {
-        let rgba = render_icon_rgba(0.5);
-        let green = count_interior_pixels_with_rgb(&rgba, (74, 222, 128));
-        let grey = count_interior_pixels_with_rgb(&rgba, (180, 180, 180));
+        let rgba = render_icon_rgba(0.5, None);
+        let green = count_interior_pixels_with_rgb(&rgba, (74, 222, 128), BAR_WIDTH);
+        let grey = count_interior_pixels_with_rgb(&rgba, (180, 180, 180), BAR_WIDTH);
         assert!(green > 0, "50% should have green fill pixels");
         assert!(grey > 0, "50% should have empty grey pixels too");
     }
 
     #[test]
     fn seventy_percent_uses_amber() {
-        let rgba = render_icon_rgba(0.70);
-        let amber = count_interior_pixels_with_rgb(&rgba, (251, 191, 36));
+        let rgba = render_icon_rgba(0.70, None);
+        let amber = count_interior_pixels_with_rgb(&rgba, (251, 191, 36), BAR_WIDTH);
         assert!(amber > 0, "70% should use amber fill");
     }
 
     #[test]
     fn ninety_percent_uses_red() {
-        let rgba = render_icon_rgba(0.90);
-        let red = count_interior_pixels_with_rgb(&rgba, (248, 113, 113));
+        let rgba = render_icon_rgba(0.90, None);
+        let red = count_interior_pixels_with_rgb(&rgba, (248, 113, 113), BAR_WIDTH);
         assert!(red > 0, "90% should use red fill");
     }
 
     #[test]
     fn hundred_percent_fills_entire_interior() {
-        let rgba = render_icon_rgba(1.0);
-        let grey = count_interior_pixels_with_rgb(&rgba, (180, 180, 180));
+        let rgba = render_icon_rgba(1.0, None);
+        let grey = count_interior_pixels_with_rgb(&rgba, (180, 180, 180), BAR_WIDTH);
         assert_eq!(grey, 0, "100% should have no empty grey pixels in interior");
     }
 
     #[test]
     fn padding_rows_are_transparent() {
-        let rgba = render_icon_rgba(0.5);
+        let rgba = render_icon_rgba(0.5, None);
         for y in 0..4 {
-            for x in 0..ICON_WIDTH {
-                let (_, _, _, a) = pixel_at(&rgba, x, y);
+            for x in 0..BAR_WIDTH {
+                let (_, _, _, a) = pixel_at(&rgba, x, y, BAR_WIDTH);
                 assert_eq!(a, 0, "pixel ({x},{y}) in top padding should be transparent");
             }
         }
         for y in 28..ICON_HEIGHT {
-            for x in 0..ICON_WIDTH {
-                let (_, _, _, a) = pixel_at(&rgba, x, y);
+            for x in 0..BAR_WIDTH {
+                let (_, _, _, a) = pixel_at(&rgba, x, y, BAR_WIDTH);
                 assert_eq!(a, 0, "pixel ({x},{y}) in bottom padding should be transparent");
             }
         }
+    }
+
+    #[test]
+    fn icon_with_text_is_wider_than_bar() {
+        let rgba = render_icon_rgba(0.5, Some("3h 42m"));
+        let expected_width = BAR_WIDTH + TEXT_GAP + text_pixel_width("3h 42m") + TRAIL_PAD;
+        assert_eq!(
+            rgba.len(),
+            (expected_width * ICON_HEIGHT * 4) as usize,
+            "icon with text should be {expected_width}px wide"
+        );
+    }
+
+    #[test]
+    fn icon_without_text_is_bar_width() {
+        let rgba = render_icon_rgba(0.5, None);
+        assert_eq!(
+            rgba.len(),
+            (BAR_WIDTH * ICON_HEIGHT * 4) as usize,
+            "icon without text should be {BAR_WIDTH}px wide"
+        );
     }
 
     #[test]
