@@ -74,6 +74,58 @@ fn text_pixel_width(text: &str) -> u32 {
     width
 }
 
+/// Render countdown text into an RGBA buffer at the given x offset.
+/// Glyphs are drawn at 2x scale, vertically centred in ICON_HEIGHT.
+fn render_text_into(
+    rgba: &mut [u8],
+    buf_width: u32,
+    x_start: u32,
+    text: &str,
+    colour: (u8, u8, u8, u8),
+) {
+    let text_h = GLYPH_RENDER_H;
+    let y_offset = (ICON_HEIGHT - text_h) / 2;
+
+    let mut cursor_x = x_start;
+    let mut first = true;
+
+    for ch in text.chars() {
+        if ch == ' ' {
+            cursor_x += SPACE_WIDTH;
+            first = false;
+            continue;
+        }
+        if !first {
+            cursor_x += CHAR_GAP;
+        }
+        first = false;
+
+        if let Some(glyph) = glyph_for_char(ch) {
+            for glyph_row in 0..7u32 {
+                let row_bits = glyph[glyph_row as usize];
+                for glyph_col in 0..5u32 {
+                    if (row_bits >> (4 - glyph_col)) & 1 == 1 {
+                        for dy in 0..2u32 {
+                            for dx in 0..2u32 {
+                                let px = cursor_x + glyph_col * 2 + dx;
+                                let py = y_offset + glyph_row * 2 + dy;
+                                if px < buf_width && py < ICON_HEIGHT {
+                                    let idx = ((py * buf_width + px) * 4) as usize;
+                                    rgba[idx] = colour.0;
+                                    rgba[idx + 1] = colour.1;
+                                    rgba[idx + 2] = colour.2;
+                                    rgba[idx + 3] = colour.3;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            cursor_x += GLYPH_RENDER_W;
+        }
+    }
+}
+
 /// Render raw RGBA bytes for a 32×32 usage icon at the given utilisation level.
 /// Pure function — no caching, no tauri dependency. Used directly by tests.
 pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
@@ -275,5 +327,33 @@ mod tests {
     #[test]
     fn text_width_empty() {
         assert_eq!(text_pixel_width(""), 0);
+    }
+
+    #[test]
+    fn render_text_produces_nonzero_pixels() {
+        let width: u32 = 40;
+        let height: u32 = 32;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        render_text_into(&mut rgba, width, 0, "5m", (220, 220, 220, 255));
+        let has_visible = rgba.chunks(4).any(|px| px[3] > 0);
+        assert!(has_visible, "render_text_into should produce visible pixels");
+    }
+
+    #[test]
+    fn render_text_respects_x_offset() {
+        let width: u32 = 80;
+        let height: u32 = 32;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        render_text_into(&mut rgba, width, 40, "1m", (220, 220, 220, 255));
+        for y in 0..height {
+            for x in 0..40u32 {
+                let idx = ((y * width + x) * 4 + 3) as usize;
+                assert_eq!(rgba[idx], 0, "pixel ({x},{y}) before offset should be transparent");
+            }
+        }
+        let has_visible_after = (0..height).any(|y| {
+            (40..width).any(|x| rgba[((y * width + x) * 4 + 3) as usize] > 0)
+        });
+        assert!(has_visible_after, "should have visible pixels after x=40");
     }
 }
