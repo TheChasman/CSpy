@@ -199,33 +199,37 @@ pub(crate) fn render_icon_rgba(quantised_util: f64, countdown: Option<&str>) -> 
     rgba
 }
 
-/// Generate a dynamic usage icon: hollow rectangle with coloured fill based on utilisation.
-/// Renders at 32×32 for Retina crispness. macOS menu bar expects @2x icons.
-///
-/// Icons are cached by quantised utilisation (5% steps) so each unique level
-/// is only rendered once. The leaked buffers are bounded to ~84 KiB total.
-pub fn generate_usage_icon(utilisation: f64) -> Image<'static> {
+/// Generate a dynamic usage icon with optional countdown text.
+/// Bar-only icons (countdown=None) are cached by quantised utilisation (21 entries max).
+/// Text icons are rendered fresh each call — the leaked buffers are bounded by the
+/// 5-hour window duration (~3.6 MB max) and reclaimed on app restart.
+pub fn generate_usage_icon(utilisation: f64, countdown: Option<&str>) -> Image<'static> {
     let util = utilisation.clamp(0.0, 1.0);
     let key = (util * 20.0).round() as u8;
 
-    {
+    // Bar-only: use cache
+    if countdown.is_none() {
         let mut guard = ICON_CACHE.lock().unwrap();
         let cache = guard.get_or_insert_with(HashMap::new);
         if let Some(rgba_ref) = cache.get(&key) {
             return Image::new(rgba_ref, BAR_WIDTH, ICON_HEIGHT);
         }
+
+        let quantised_util = key as f64 / 20.0;
+        let rgba = render_icon_rgba(quantised_util, None);
+        let rgba_static: &'static [u8] = Box::leak(rgba.into_boxed_slice());
+        cache.insert(key, rgba_static);
+        return Image::new(rgba_static, BAR_WIDTH, ICON_HEIGHT);
     }
 
+    // Text icon: render fresh, leak
     let quantised_util = key as f64 / 20.0;
-    let rgba = render_icon_rgba(quantised_util, None);
-
+    let text = countdown.unwrap();
+    let tw = text_pixel_width(text);
+    let total_width = BAR_WIDTH + TEXT_GAP + tw + TRAIL_PAD;
+    let rgba = render_icon_rgba(quantised_util, countdown);
     let rgba_static: &'static [u8] = Box::leak(rgba.into_boxed_slice());
-
-    let mut guard = ICON_CACHE.lock().unwrap();
-    let cache = guard.get_or_insert_with(HashMap::new);
-    cache.insert(key, rgba_static);
-
-    Image::new(rgba_static, BAR_WIDTH, ICON_HEIGHT)
+    Image::new(rgba_static, total_width, ICON_HEIGHT)
 }
 
 #[cfg(test)]
