@@ -9,6 +9,41 @@ pub(crate) const ICON_HEIGHT: u32 = 32;
 /// Maximum 21 entries × 4 KiB = 84 KiB total — bounded, no unbounded leak.
 static ICON_CACHE: Mutex<Option<HashMap<u8, &'static [u8]>>> = Mutex::new(None);
 
+/// 5x7 bitmap font for countdown text. Each glyph is 7 rows of 5 bits.
+/// Bit 4 = leftmost pixel, bit 0 = rightmost pixel.
+const GLYPH_0: [u8; 7] = [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110];
+const GLYPH_1: [u8; 7] = [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110];
+const GLYPH_2: [u8; 7] = [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111];
+const GLYPH_3: [u8; 7] = [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110];
+const GLYPH_4: [u8; 7] = [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010];
+const GLYPH_5: [u8; 7] = [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110];
+const GLYPH_6: [u8; 7] = [0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110];
+const GLYPH_7: [u8; 7] = [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000];
+const GLYPH_8: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110];
+const GLYPH_9: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110];
+const GLYPH_H: [u8; 7] = [0b10000, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b10001];
+const GLYPH_M: [u8; 7] = [0b00000, 0b00000, 0b11010, 0b10101, 0b10101, 0b10101, 0b10101];
+
+/// Return the 5x7 glyph for a character, or None for space/unknown.
+fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
+    match ch {
+        '0' => Some(&GLYPH_0),
+        '1' => Some(&GLYPH_1),
+        '2' => Some(&GLYPH_2),
+        '3' => Some(&GLYPH_3),
+        '4' => Some(&GLYPH_4),
+        '5' => Some(&GLYPH_5),
+        '6' => Some(&GLYPH_6),
+        '7' => Some(&GLYPH_7),
+        '8' => Some(&GLYPH_8),
+        '9' => Some(&GLYPH_9),
+        'h' => Some(&GLYPH_H),
+        'm' => Some(&GLYPH_M),
+        ' ' => None,
+        _ => None,
+    }
+}
+
 /// Render raw RGBA bytes for a 32×32 usage icon at the given utilisation level.
 /// Pure function — no caching, no tauri dependency. Used directly by tests.
 pub(crate) fn render_icon_rgba(quantised_util: f64) -> Vec<u8> {
@@ -169,6 +204,30 @@ mod tests {
             for x in 0..ICON_WIDTH {
                 let (_, _, _, a) = pixel_at(&rgba, x, y);
                 assert_eq!(a, 0, "pixel ({x},{y}) in bottom padding should be transparent");
+            }
+        }
+    }
+
+    #[test]
+    fn glyph_coverage_all_countdown_chars() {
+        for ch in "0123456789hm ".chars() {
+            assert!(
+                glyph_for_char(ch).is_some() || ch == ' ',
+                "missing glyph for '{ch}'"
+            );
+        }
+    }
+
+    #[test]
+    fn glyphs_are_5x7() {
+        for ch in "0123456789hm".chars() {
+            let glyph = glyph_for_char(ch).unwrap();
+            assert_eq!(glyph.len(), 7, "glyph for '{ch}' should have 7 rows");
+            for (row_idx, row) in glyph.iter().enumerate() {
+                assert!(
+                    *row < 32,
+                    "glyph '{ch}' row {row_idx} uses more than 5 bits: {row:#010b}"
+                );
             }
         }
     }
