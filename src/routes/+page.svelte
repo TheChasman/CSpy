@@ -132,7 +132,7 @@
 					></div>
 				</div>
 				<div class="bucket-footer dim mono">
-					Resets in {formatCountdown(usage.five_hour?.resets_at ?? null)}
+					Reset: {formatCountdown(usage.five_hour?.resets_at ?? null)}
 				</div>
 			</section>
 

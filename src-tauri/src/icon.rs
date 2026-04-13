@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use tauri::image::Image;
 
 pub(crate) const BAR_WIDTH: u32 = 32;
-pub(crate) const ICON_HEIGHT: u32 = 32;
+pub(crate) const ICON_HEIGHT: u32 = 40; // 20pt at 2x Retina
 
 /// Cache of rendered icon buffers, keyed by quantised utilisation (0–20 = 5% steps).
 /// Maximum 21 entries × 4 KiB = 84 KiB total — bounded, no unbounded leak.
@@ -21,8 +21,7 @@ const GLYPH_6: [u8; 7] = [0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 
 const GLYPH_7: [u8; 7] = [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000];
 const GLYPH_8: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110];
 const GLYPH_9: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110];
-const GLYPH_H: [u8; 7] = [0b10000, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b10001];
-const GLYPH_M: [u8; 7] = [0b00000, 0b00000, 0b11010, 0b10101, 0b10101, 0b10101, 0b10101];
+const GLYPH_COLON: [u8; 7] = [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000];
 
 /// Return the 5x7 glyph for a character, or None for space/unknown.
 fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
@@ -37,17 +36,16 @@ fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
         '7' => Some(&GLYPH_7),
         '8' => Some(&GLYPH_8),
         '9' => Some(&GLYPH_9),
-        'h' => Some(&GLYPH_H),
-        'm' => Some(&GLYPH_M),
+        ':' => Some(&GLYPH_COLON),
         ' ' => None,
         _ => None,
     }
 }
 
-/// Glyph render width at 2x scale.
-const GLYPH_RENDER_W: u32 = 10;
-/// Glyph render height at 2x scale.
-const GLYPH_RENDER_H: u32 = 14;
+/// Glyph render width at 3x scale.
+const GLYPH_RENDER_W: u32 = 15;
+/// Glyph render height at 3x scale.
+const GLYPH_RENDER_H: u32 = 21;
 /// Pixels between glyphs.
 const CHAR_GAP: u32 = 1;
 /// Pixels for a space character.
@@ -111,10 +109,11 @@ fn render_text_into(
                 let row_bits = glyph[glyph_row as usize];
                 for glyph_col in 0..5u32 {
                     if (row_bits >> (4 - glyph_col)) & 1 == 1 {
-                        for dy in 0..2u32 {
-                            for dx in 0..2u32 {
-                                let px = cursor_x + glyph_col * 2 + dx;
-                                let py = y_offset + glyph_row * 2 + dy;
+                        for dy in 0..3u32 {
+                            for dx in 0..3u32 {
+                                let px = cursor_x + glyph_col * 3 + dx;
+                                // Flip vertical: row 0 = bottom of glyph, row 6 = top
+                                let py = y_offset + (6 - glyph_row) * 3 + dy;
                                 if px < buf_width && py < ICON_HEIGHT {
                                     let idx = ((py * buf_width + px) * 4) as usize;
                                     rgba[idx] = colour.0;
@@ -255,9 +254,9 @@ mod tests {
     }
 
     #[test]
-    fn dimensions_are_32x32() {
+    fn dimensions_are_32x40() {
         let rgba = render_icon_rgba(0.5, None);
-        assert_eq!(rgba.len(), (32 * 32 * 4) as usize);
+        assert_eq!(rgba.len(), (32 * 40 * 4) as usize);
     }
 
     #[test]
@@ -306,7 +305,7 @@ mod tests {
                 assert_eq!(a, 0, "pixel ({x},{y}) in top padding should be transparent");
             }
         }
-        for y in 28..ICON_HEIGHT {
+        for y in 36..ICON_HEIGHT {
             for x in 0..BAR_WIDTH {
                 let (_, _, _, a) = pixel_at(&rgba, x, y, BAR_WIDTH);
                 assert_eq!(a, 0, "pixel ({x},{y}) in bottom padding should be transparent");
@@ -316,8 +315,8 @@ mod tests {
 
     #[test]
     fn icon_with_text_is_wider_than_bar() {
-        let rgba = render_icon_rgba(0.5, Some("3h 42m"));
-        let expected_width = BAR_WIDTH + TEXT_GAP + text_pixel_width("3h 42m") + TRAIL_PAD;
+        let rgba = render_icon_rgba(0.5, Some("1:37"));
+        let expected_width = BAR_WIDTH + TEXT_GAP + text_pixel_width("1:37") + TRAIL_PAD;
         assert_eq!(
             rgba.len(),
             (expected_width * ICON_HEIGHT * 4) as usize,
@@ -337,7 +336,7 @@ mod tests {
 
     #[test]
     fn glyph_coverage_all_countdown_chars() {
-        for ch in "0123456789hm ".chars() {
+        for ch in "0123456789: ".chars() {
             assert!(
                 glyph_for_char(ch).is_some() || ch == ' ',
                 "missing glyph for '{ch}'"
@@ -347,7 +346,7 @@ mod tests {
 
     #[test]
     fn glyphs_are_5x7() {
-        for ch in "0123456789hm".chars() {
+        for ch in "0123456789:".chars() {
             let glyph = glyph_for_char(ch).unwrap();
             assert_eq!(glyph.len(), 7, "glyph for '{ch}' should have 7 rows");
             for (row_idx, row) in glyph.iter().enumerate() {
@@ -361,12 +360,12 @@ mod tests {
 
     #[test]
     fn text_width_single_digit() {
-        assert_eq!(text_pixel_width("5m"), 21);
+        assert_eq!(text_pixel_width("42"), 31);
     }
 
     #[test]
     fn text_width_hours_and_mins() {
-        assert_eq!(text_pixel_width("3h 42m"), 60);
+        assert_eq!(text_pixel_width("1:37"), 63);
     }
 
     #[test]
@@ -377,9 +376,9 @@ mod tests {
     #[test]
     fn render_text_produces_nonzero_pixels() {
         let width: u32 = 40;
-        let height: u32 = 32;
+        let height: u32 = 40;
         let mut rgba = vec![0u8; (width * height * 4) as usize];
-        render_text_into(&mut rgba, width, 0, "5m", (220, 220, 220, 255));
+        render_text_into(&mut rgba, width, 0, "42", (220, 220, 220, 255));
         let has_visible = rgba.chunks(4).any(|px| px[3] > 0);
         assert!(has_visible, "render_text_into should produce visible pixels");
     }
@@ -387,9 +386,9 @@ mod tests {
     #[test]
     fn render_text_respects_x_offset() {
         let width: u32 = 80;
-        let height: u32 = 32;
+        let height: u32 = 40;
         let mut rgba = vec![0u8; (width * height * 4) as usize];
-        render_text_into(&mut rgba, width, 40, "1m", (220, 220, 220, 255));
+        render_text_into(&mut rgba, width, 40, "1:37", (220, 220, 220, 255));
         for y in 0..height {
             for x in 0..40u32 {
                 let idx = ((y * width + x) * 4 + 3) as usize;

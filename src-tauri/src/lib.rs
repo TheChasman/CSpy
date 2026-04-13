@@ -515,7 +515,7 @@ fn is_window_expired(bucket: &usage::UsageBucket) -> bool {
         .unwrap_or(false)
 }
 
-/// Format remaining time until `resets_at` as "Xh Ym", "Ym", or "0m".
+/// Format remaining time until `resets_at` as "X:Y" or "Y".
 fn format_countdown(resets_at: &str) -> String {
     let Ok(reset) = chrono::DateTime::parse_from_rfc3339(resets_at) else {
         return "—".into();
@@ -527,9 +527,9 @@ fn format_countdown(resets_at: &str) -> String {
     let hours = total_mins / 60;
     let mins = total_mins % 60;
     if hours > 0 {
-        format!("{hours}h {mins}m")
+        format!("{hours}:{mins:02}")
     } else {
-        format!("{mins}m")
+        format!("{mins}")
     }
 }
 
@@ -700,7 +700,7 @@ mod tests {
     fn countdown_future_hours_and_mins() {
         let reset = (chrono::Utc::now() + chrono::Duration::minutes(150)).to_rfc3339();
         let result = format_countdown(&reset);
-        assert!(result.starts_with("2h "), "expected '2h Xm', got '{result}'");
+        assert!(result.starts_with("2:"), "expected '2:XX', got '{result}'");
     }
 
     #[test]
@@ -708,7 +708,7 @@ mod tests {
         let reset = (chrono::Utc::now() + chrono::Duration::minutes(42)).to_rfc3339();
         let result = format_countdown(&reset);
         // Allow 1m tolerance due to timing variations
-        assert!(result == "42m" || result == "41m", "expected '41m' or '42m', got '{result}'");
+        assert!(result == "42" || result == "41", "expected '41' or '42', got '{result}'");
     }
 
     #[test]
