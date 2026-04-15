@@ -26,6 +26,10 @@ pub struct AppState {
     pub startup_time: std::sync::OnceLock<std::time::Instant>,
     /// Vite child process (dev builds only). Killed on app exit.
     pub vite_child: std::sync::Mutex<Option<std::process::Child>>,
+    /// Optional Factory API key for monthly token usage overlay in tray icon.
+    pub factory_api_key: Option<String>,
+    /// Monthly Factory token cap for utilisation percentage.
+    pub factory_monthly_cap_tokens: u64,
 }
 
 /// Poll interval in seconds.
@@ -75,7 +79,8 @@ async fn refresh_usage(state: State<'_, Arc<AppState>>) -> Result<UsageData, Str
     log::info!("refresh_usage called from frontend");
     let token = ensure_token(&state).await?;
     match usage::fetch_usage(&state.client, &token).await {
-        Ok(data) => {
+        Ok(mut data) => {
+            maybe_attach_factory_month_usage(&state, &mut data).await;
             *state.cached.write().await = Some(data.clone());
             Ok(data)
         }
@@ -143,6 +148,21 @@ async fn ensure_token(state: &AppState) -> Result<String, String> {
     *state.token.write().await = Some(info.token.clone());
     *state.token_expires_at_ms.write().await = info.expires_at_ms;
     Ok(info.token)
+}
+
+async fn maybe_attach_factory_month_usage(state: &AppState, data: &mut UsageData) {
+    let Some(api_key) = state.factory_api_key.as_deref() else {
+        data.factory_month = None;
+        return;
+    };
+
+    match usage::fetch_factory_month_usage(&state.client, api_key, state.factory_monthly_cap_tokens).await {
+        Ok(bucket) => data.factory_month = Some(bucket),
+        Err(e) => {
+            log::warn!("Factory usage fetch failed: {e}");
+            data.factory_month = None;
+        }
+    }
 }
 
 // ── Popover positioning ──────────────────────────────────────
@@ -254,7 +274,8 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
                 };
 
                 match usage::fetch_usage(&state.client, &token).await {
-                    Ok(data) => {
+                    Ok(mut data) => {
+                        maybe_attach_factory_month_usage(&state, &mut data).await;
                         if consecutive_errors > 0 {
                             log::info!("Poll succeeded after {} consecutive error(s) — backoff reset",
                                 consecutive_errors);
@@ -306,8 +327,7 @@ fn start_polling(app_handle: tauri::AppHandle, state: Arc<AppState>) {
     });
 }
 
-/// Tick every 60 seconds to update the tray icon countdown without a fresh API fetch.
-/// Also resets the icon to 0% when the five-hour window has expired (e.g. during quiet hours).
+/// Tick every 60 seconds to refresh tray icon text from cached usage data.
 fn start_countdown_ticker(app_handle: tauri::AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -328,6 +348,21 @@ fn start_watchdog(app_handle: tauri::AppHandle, state: Arc<AppState>) {
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(WATCHDOG_TICK_SECS)).await;
+
+            // Skip watchdog checks while popover is hidden. The frontend heartbeat
+            // loop is tied to the WebView runtime and may be throttled/inactive
+            // when the popover is not visible, which would otherwise cause false
+            // "unresponsive" notifications.
+            let popover_visible = app_handle
+                .get_webview_window("popover")
+                .and_then(|w| w.is_visible().ok())
+                .unwrap_or(false);
+            if !popover_visible {
+                if reload_count > 0 {
+                    reload_count = 0;
+                }
+                continue;
+            }
 
             let last = *state.last_heartbeat.read().await;
             let Some(startup) = state.startup_time.get().copied() else {
@@ -533,18 +568,36 @@ fn format_countdown(resets_at: &str) -> String {
     }
 }
 
-/// Regenerate the tray icon with the current utilisation and countdown text baked in.
+/// Regenerate the tray icon with current utilisation and text baked in.
 fn update_tray_icon(app: &tauri::AppHandle, data: &UsageData) {
-    let (util, cd_string) = match &data.five_hour {
+    let (util, text_string) = match &data.five_hour {
         Some(bucket) if !is_window_expired(bucket) => {
+            let pct = (bucket.utilisation * 100.0).round().clamp(0.0, 100.0) as u32;
             let cd = bucket.resets_at.as_deref()
                 .map(format_countdown)
-                .filter(|s| s != "\u{2014}"); // filter out em dash (expired)
-            (bucket.utilisation, cd)
+                .filter(|s| s != "\u{2014}");
+            let text = match cd {
+                Some(cd_text) => format!("{pct}% {cd_text}"),
+                None => format!("{pct}%"),
+            };
+            (bucket.utilisation, Some(text))
         }
         _ => (0.0, None),
     };
-    let new_icon = icon::generate_usage_icon(util, cd_string.as_deref());
+
+    let (factory_util, factory_text) = data.factory_month.as_ref()
+        .map(|b| {
+            let pct = (b.utilisation * 100.0).round().clamp(0.0, 100.0) as u32;
+            (Some(b.utilisation), Some(format!("{pct}%")))
+        })
+        .unwrap_or((None, None));
+
+    let new_icon = icon::generate_usage_icon_dual(
+        util,
+        text_string.as_deref(),
+        factory_util,
+        factory_text.as_deref(),
+    );
     if let Some(tray) = app.tray_by_id("cspy-tray") {
         let _ = tray.set_icon(Some(new_icon));
     }
@@ -561,8 +614,13 @@ fn update_tray_tooltip(app: &tauri::AppHandle, data: &UsageData) {
         .as_ref()
         .map(|b| format!("{}%", (b.utilisation * 100.0) as u32))
         .unwrap_or_else(|| "—".into());
+    let fm = data
+        .factory_month
+        .as_ref()
+        .map(|b| format!("{}%", (b.utilisation * 100.0) as u32))
+        .unwrap_or_else(|| "—".into());
 
-    let tip = format!("CSpy — 5h: {h5} | 7d: {d7}");
+    let tip = format!("CSpy — 5h: {h5} | 7d: {d7} | Droid: {fm}");
 
     if let Some(tray) = app.tray_by_id("cspy-tray") {
         let _ = tray.set_tooltip(Some(&tip));
@@ -574,6 +632,7 @@ fn update_tray_tooltip(app: &tauri::AppHandle, data: &UsageData) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let client = usage::build_client().expect("Failed to build HTTP client");
+    let factory_settings = keychain::load_factory_settings(20_000_000);
 
     let state = Arc::new(AppState {
         token: RwLock::new(None),
@@ -584,6 +643,8 @@ pub fn run() {
         last_heartbeat: RwLock::new(None),
         startup_time: std::sync::OnceLock::new(),
         vite_child: std::sync::Mutex::new(None),
+        factory_api_key: factory_settings.api_key,
+        factory_monthly_cap_tokens: factory_settings.monthly_cap_tokens,
     });
 
     tauri::Builder::default()
@@ -632,7 +693,7 @@ pub fn run() {
             // Start background polling
             start_polling(handle, state.clone());
 
-            // Start 1-minute countdown ticker for tray title
+            // Start 1-minute ticker to refresh tray icon text from cached data
             start_countdown_ticker(app.handle().clone(), state.clone());
 
             // Start background update checker
@@ -647,7 +708,8 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 match ensure_token(&s).await {
                     Ok(token) => match usage::fetch_usage(&s.client, &token).await {
-                        Ok(data) => {
+                        Ok(mut data) => {
+                            maybe_attach_factory_month_usage(&s, &mut data).await;
                             update_tray_icon(&h, &data);
                             update_tray_tooltip(&h, &data);
                             *s.cached.write().await = Some(data.clone());

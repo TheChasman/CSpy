@@ -22,6 +22,7 @@ const GLYPH_7: [u8; 7] = [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 
 const GLYPH_8: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110];
 const GLYPH_9: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110];
 const GLYPH_COLON: [u8; 7] = [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000];
+const GLYPH_PERCENT: [u8; 7] = [0b11001, 0b11010, 0b00100, 0b00100, 0b01011, 0b10011, 0b00000];
 
 /// Return the 5x7 glyph for a character, or None for space/unknown.
 fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
@@ -37,6 +38,7 @@ fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
         '8' => Some(&GLYPH_8),
         '9' => Some(&GLYPH_9),
         ':' => Some(&GLYPH_COLON),
+        '%' => Some(&GLYPH_PERCENT),
         ' ' => None,
         _ => None,
     }
@@ -52,6 +54,8 @@ const CHAR_GAP: u32 = 1;
 const SPACE_WIDTH: u32 = 6;
 /// Gap between bar and text in pixels.
 const TEXT_GAP: u32 = 4;
+/// Gap between the first text block and secondary bar segment.
+const SEGMENT_GAP: u32 = 4;
 /// Trailing padding after text in pixels.
 const TRAIL_PAD: u32 = 2;
 /// Text colour: light grey, fully opaque.
@@ -130,28 +134,20 @@ fn render_text_into(
     }
 }
 
-/// Render raw RGBA bytes for a usage icon at the given utilisation level.
-/// Width is `BAR_WIDTH` when no countdown text is given, or wider to fit text.
-/// Pure function — no caching, no tauri dependency. Used directly by tests.
-pub(crate) fn render_icon_rgba(quantised_util: f64, countdown: Option<&str>) -> Vec<u8> {
-    const BORDER: u32 = 2;
-    const PADDING: u32 = 4;
-
-    let tw = countdown.map(|t| text_pixel_width(t)).unwrap_or(0);
-    let total_width = if tw > 0 {
-        BAR_WIDTH + TEXT_GAP + tw + TRAIL_PAD
-    } else {
-        BAR_WIDTH
-    };
-
-    let fill_color: (u8, u8, u8) = if quantised_util >= 0.90 {
+fn bar_fill_colour(quantised_util: f64) -> (u8, u8, u8) {
+    if quantised_util >= 0.90 {
         (248, 113, 113) // Red: #f87171
     } else if quantised_util >= 0.70 {
-        (251, 191, 36)  // Amber: #fbbf24
+        (251, 191, 36) // Amber: #fbbf24
     } else {
-        (74, 222, 128)  // Green: #4ade80
-    };
+        (74, 222, 128) // Green: #4ade80
+    }
+}
 
+fn render_bar_into(rgba: &mut [u8], row_width: u32, x_offset: u32, quantised_util: f64) {
+    const BORDER: u32 = 2;
+    const PADDING: u32 = 4;
+    let fill_color = bar_fill_colour(quantised_util);
     let outline_color: (u8, u8, u8) = (60, 60, 60);
 
     let inner_left = BORDER;
@@ -161,37 +157,80 @@ pub(crate) fn render_icon_rgba(quantised_util: f64, countdown: Option<&str>) -> 
     let inner_width = inner_right - inner_left - 2 * BORDER;
     let fill_width = ((inner_width as f64 * quantised_util) as u32).min(inner_width);
 
-    let mut rgba = vec![0u8; (total_width * ICON_HEIGHT * 4) as usize];
-
-    // Render bar in leftmost BAR_WIDTH columns
     for y in 0..ICON_HEIGHT {
-        for x in 0..BAR_WIDTH {
-            let pixel_idx = ((y * total_width + x) * 4) as usize;
-
+        for lx in 0..BAR_WIDTH {
+            let x = x_offset + lx;
+            let pixel_idx = ((y * row_width + x) * 4) as usize;
             let (r, g, b, a) = if y < inner_top || y >= inner_bottom {
                 (0, 0, 0, 0)
-            } else if x < inner_left + BORDER || x >= inner_right - BORDER
+            } else if lx < inner_left + BORDER || lx >= inner_right - BORDER
                 || y < inner_top + BORDER || y >= inner_bottom - BORDER {
                 (outline_color.0, outline_color.1, outline_color.2, 255)
             } else {
-                let inner_x = x - inner_left - BORDER;
+                let inner_x = lx - inner_left - BORDER;
                 if inner_x < fill_width {
                     (fill_color.0, fill_color.1, fill_color.2, 255)
                 } else {
                     (180, 180, 180, 80)
                 }
             };
-
             rgba[pixel_idx] = r;
             rgba[pixel_idx + 1] = g;
             rgba[pixel_idx + 2] = b;
             rgba[pixel_idx + 3] = a;
         }
     }
+}
 
-    // Render countdown text to the right of the bar
-    if let Some(text) = countdown {
-        render_text_into(&mut rgba, total_width, BAR_WIDTH + TEXT_GAP, text, TEXT_COLOUR);
+/// Render raw RGBA bytes for a usage icon at the given utilisation level.
+/// Width is `BAR_WIDTH` when no countdown text is given, or wider to fit text.
+/// Pure function — no caching, no tauri dependency. Used directly by tests.
+pub(crate) fn render_icon_rgba(quantised_util: f64, countdown: Option<&str>) -> Vec<u8> {
+    render_icon_rgba_dual(quantised_util, countdown, None, None)
+}
+
+pub(crate) fn render_icon_rgba_dual(
+    primary_util: f64,
+    primary_text: Option<&str>,
+    secondary_util: Option<f64>,
+    secondary_text: Option<&str>,
+) -> Vec<u8> {
+    let primary_tw = primary_text.map(text_pixel_width).unwrap_or(0);
+    let secondary_tw = secondary_text.map(text_pixel_width).unwrap_or(0);
+    let has_secondary = secondary_util.is_some();
+
+    let mut total_width = BAR_WIDTH;
+    if primary_tw > 0 {
+        total_width += TEXT_GAP + primary_tw;
+    }
+    if has_secondary {
+        total_width += SEGMENT_GAP + BAR_WIDTH;
+        if secondary_tw > 0 {
+            total_width += TEXT_GAP + secondary_tw;
+        }
+    }
+    if primary_tw > 0 || has_secondary {
+        total_width += TRAIL_PAD;
+    }
+
+    let mut rgba = vec![0u8; (total_width * ICON_HEIGHT * 4) as usize];
+    render_bar_into(&mut rgba, total_width, 0, primary_util.clamp(0.0, 1.0));
+
+    let mut cursor = BAR_WIDTH;
+    if let Some(text) = primary_text {
+        cursor += TEXT_GAP;
+        render_text_into(&mut rgba, total_width, cursor, text, TEXT_COLOUR);
+        cursor += primary_tw;
+    }
+
+    if let Some(sec_util) = secondary_util {
+        cursor += SEGMENT_GAP;
+        render_bar_into(&mut rgba, total_width, cursor, sec_util.clamp(0.0, 1.0));
+        cursor += BAR_WIDTH;
+        if let Some(text) = secondary_text {
+            cursor += TEXT_GAP;
+            render_text_into(&mut rgba, total_width, cursor, text, TEXT_COLOUR);
+        }
     }
 
     rgba
@@ -226,6 +265,30 @@ pub fn generate_usage_icon(utilisation: f64, countdown: Option<&str>) -> Image<'
     let tw = text_pixel_width(text);
     let total_width = BAR_WIDTH + TEXT_GAP + tw + TRAIL_PAD;
     let rgba = render_icon_rgba(quantised_util, countdown);
+    let rgba_static: &'static [u8] = Box::leak(rgba.into_boxed_slice());
+    Image::new(rgba_static, total_width, ICON_HEIGHT)
+}
+
+/// Generate a dual-bar tray icon: primary (Anthropic) + optional secondary (Factory).
+pub fn generate_usage_icon_dual(
+    primary_util: f64,
+    primary_text: Option<&str>,
+    secondary_util: Option<f64>,
+    secondary_text: Option<&str>,
+) -> Image<'static> {
+    if secondary_util.is_none() {
+        return generate_usage_icon(primary_util, primary_text);
+    }
+
+    let key = (primary_util.clamp(0.0, 1.0) * 20.0).round() as u8;
+    let quantised_primary = key as f64 / 20.0;
+    let rgba = render_icon_rgba_dual(
+        quantised_primary,
+        primary_text,
+        secondary_util,
+        secondary_text,
+    );
+    let total_width = (rgba.len() as u32) / (ICON_HEIGHT * 4);
     let rgba_static: &'static [u8] = Box::leak(rgba.into_boxed_slice());
     Image::new(rgba_static, total_width, ICON_HEIGHT)
 }
@@ -335,7 +398,7 @@ mod tests {
 
     #[test]
     fn glyph_coverage_all_countdown_chars() {
-        for ch in "0123456789: ".chars() {
+        for ch in "0123456789:% ".chars() {
             assert!(
                 glyph_for_char(ch).is_some() || ch == ' ',
                 "missing glyph for '{ch}'"
@@ -345,7 +408,7 @@ mod tests {
 
     #[test]
     fn glyphs_are_5x7() {
-        for ch in "0123456789:".chars() {
+        for ch in "0123456789:%".chars() {
             let glyph = glyph_for_char(ch).unwrap();
             assert_eq!(glyph.len(), 7, "glyph for '{ch}' should have 7 rows");
             for (row_idx, row) in glyph.iter().enumerate() {

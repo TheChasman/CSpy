@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
+use chrono::Datelike;
 
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+pub const FACTORY_ANALYTICS_TOKENS_URL: &str = "https://api.factory.ai/api/v1/analytics/tokens";
 const USER_AGENT: &str = "cspy/0.1.0";
 const BETA_HEADER: &str = "oauth-2025-04-20";
 
@@ -17,11 +19,23 @@ struct ApiBucket {
     resets_at: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct FactoryTokensResponse {
+    data: Vec<FactoryTokenDay>,
+}
+
+#[derive(Deserialize)]
+struct FactoryTokenDay {
+    #[serde(default)]
+    billable_tokens: f64,
+}
+
 /// Normalised usage data sent to the Svelte frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageData {
     pub five_hour: Option<UsageBucket>,
     pub seven_day: Option<UsageBucket>,
+    pub factory_month: Option<UsageBucket>,
     pub fetched_at: String,
 }
 
@@ -102,7 +116,72 @@ pub async fn fetch_usage_from(client: &reqwest::Client, token: &str, url: &str) 
             utilisation: b.utilization / 100.0,
             resets_at: b.resets_at,
         }),
+        factory_month: None,
         fetched_at: now,
+    })
+}
+
+/// Fetch current-month Factory token utilisation vs a monthly cap.
+/// Uses UTC month-to-yesterday because analytics has a 24h lag.
+pub async fn fetch_factory_month_usage(
+    client: &reqwest::Client,
+    api_key: &str,
+    monthly_cap_tokens: u64,
+) -> Result<UsageBucket, String> {
+    if monthly_cap_tokens == 0 {
+        return Err("Factory monthly cap must be > 0".into());
+    }
+
+    let today = chrono::Utc::now().date_naive();
+    let month_start = today.with_day(1)
+        .ok_or_else(|| "Failed to compute month start".to_string())?;
+    let yesterday = today.pred_opt()
+        .ok_or_else(|| "Failed to compute yesterday".to_string())?;
+
+    if yesterday < month_start {
+        return Ok(UsageBucket {
+            utilisation: 0.0,
+            resets_at: None,
+        });
+    }
+
+    let url = format!(
+        "{FACTORY_ANALYTICS_TOKENS_URL}?startDate={}&endDate={}",
+        month_start.format("%Y-%m-%d"),
+        yesterday.format("%Y-%m-%d")
+    );
+
+    let resp = client
+        .get(url)
+        .bearer_auth(api_key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Factory analytics request failed: {e}"))?;
+
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err("factory_api_unauthorized".into());
+    }
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err("factory_api_forbidden".into());
+    }
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Factory analytics returned {status}: {body}"));
+    }
+
+    let api: FactoryTokensResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Factory analytics response: {e}"))?;
+
+    let used_tokens: f64 = api.data.iter().map(|d| d.billable_tokens.max(0.0)).sum();
+    let utilisation = (used_tokens / monthly_cap_tokens as f64).clamp(0.0, 1.0);
+
+    Ok(UsageBucket {
+        utilisation,
+        resets_at: None,
     })
 }
 
@@ -122,6 +201,7 @@ mod tests {
                 utilisation: b.utilization / 100.0,
                 resets_at: b.resets_at,
             }),
+            factory_month: None,
             fetched_at: now,
         }
     }

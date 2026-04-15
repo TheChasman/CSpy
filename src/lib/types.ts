@@ -2,6 +2,7 @@
 export interface UsageData {
 	five_hour: UsageBucket | null;
 	seven_day: UsageBucket | null;
+	factory_month: UsageBucket | null;
 	fetched_at: string;
 }
 

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::process::Command;
+use std::path::{Path, PathBuf};
 
 /// Credential blob stored by Claude Code in macOS Keychain.
 #[derive(Deserialize)]
@@ -43,20 +44,89 @@ pub struct TokenInfo {
     pub expires_at_ms: Option<i64>,
 }
 
+#[derive(Default)]
+pub struct FactorySettings {
+    pub api_key: Option<String>,
+    pub monthly_cap_tokens: u64,
+}
+
+#[derive(Deserialize)]
+struct KeysFile {
+    anthropic: Option<AnthropicKeys>,
+    factory: Option<FactoryKeys>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicKeys {
+    oauth_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FactoryKeys {
+    api_key: Option<String>,
+    monthly_cap_tokens: Option<u64>,
+}
+
 /// Read the Claude OAuth token.
 ///
 /// Sources checked in order:
-/// 1. Token file at `~/.config/cspy/token` (for users without Claude Code)
-/// 2. macOS Keychain — "Claude Code-credentials" (automatic if Claude Code is installed)
+/// 1. Named key in `~/.config/cspy/keys.json` (`anthropic.oauth_token`)
+/// 2. Legacy token file at `~/.config/cspy/token`
+/// 3. macOS Keychain — "Claude Code-credentials" (automatic if Claude Code is installed)
 pub fn get_oauth_token() -> Result<TokenInfo, String> {
-    // Source 1: token file (no expiry info available)
+    // Source 1: named keys file (no expiry info available)
+    if let Some(token) = read_anthropic_token_from_keys_file() {
+        log::info!("Token loaded from ~/.config/cspy/keys.json (anthropic.oauth_token)");
+        return Ok(TokenInfo { token, expires_at_ms: None });
+    }
+
+    // Source 2: legacy token file (no expiry info available)
     if let Some(token) = read_token_file() {
         log::info!("Token loaded from ~/.config/cspy/token");
         return Ok(TokenInfo { token, expires_at_ms: None });
     }
 
-    // Source 2: macOS Keychain (Claude Code stores credentials here)
+    // Source 3: macOS Keychain (Claude Code stores credentials here)
     read_keychain_token()
+}
+
+/// Load Factory settings from named config keys and environment fallback.
+/// Precedence:
+/// - API key: `~/.config/cspy/keys.json` (`factory.api_key`) → `FACTORY_API_KEY`
+/// - Monthly cap: `factory.monthly_cap_tokens` → `CSPY_FACTORY_MONTHLY_CAP_TOKENS` → default
+pub fn load_factory_settings(default_monthly_cap_tokens: u64) -> FactorySettings {
+    let mut out = FactorySettings {
+        api_key: None,
+        monthly_cap_tokens: default_monthly_cap_tokens,
+    };
+
+    if let Some(home) = std::env::var("HOME").ok() {
+        if let Some(keys) = read_keys_file_from(Path::new(&home)) {
+            if let Some(factory) = keys.factory {
+                out.api_key = normalize_opt(factory.api_key);
+                if let Some(cap) = factory.monthly_cap_tokens {
+                    if cap > 0 {
+                        out.monthly_cap_tokens = cap;
+                    }
+                }
+            }
+        }
+    }
+
+    if out.api_key.is_none() {
+        out.api_key = normalize_opt(std::env::var("FACTORY_API_KEY").ok());
+    }
+
+    if let Some(cap) = std::env::var("CSPY_FACTORY_MONTHLY_CAP_TOKENS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        if cap > 0 {
+            out.monthly_cap_tokens = cap;
+        }
+    }
+
+    out
 }
 
 /// Read token from ~/.config/cspy/token if it exists.
@@ -65,15 +135,40 @@ fn read_token_file() -> Option<String> {
     read_token_file_from(std::path::Path::new(&home))
 }
 
+fn read_anthropic_token_from_keys_file() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    read_anthropic_token_from_keys_file_from(Path::new(&home))
+}
+
 /// Read token from `<home>/.config/cspy/token`. Testable with a temp directory.
 fn read_token_file_from(home: &std::path::Path) -> Option<String> {
     let path = home.join(".config/cspy/token");
     let contents = std::fs::read_to_string(&path).ok()?;
-    let token = contents.trim().to_string();
-    if token.is_empty() {
-        return None;
-    }
-    Some(token)
+    normalize_str(&contents)
+}
+
+fn read_anthropic_token_from_keys_file_from(home: &Path) -> Option<String> {
+    let keys = read_keys_file_from(home)?;
+    normalize_opt(keys.anthropic?.oauth_token)
+}
+
+fn keys_file_path(home: &Path) -> PathBuf {
+    home.join(".config/cspy/keys.json")
+}
+
+fn read_keys_file_from(home: &Path) -> Option<KeysFile> {
+    let path = keys_file_path(home);
+    let contents = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+fn normalize_str(v: &str) -> Option<String> {
+    let s = v.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+fn normalize_opt(v: Option<String>) -> Option<String> {
+    v.and_then(|s| normalize_str(&s))
 }
 
 /// Read token from macOS Keychain via the `security` CLI.
@@ -87,6 +182,7 @@ fn read_keychain_token() -> Result<TokenInfo, String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
             "No token found. Either:\n  \
+             • Save named keys to ~/.config/cspy/keys.json, or\n  \
              • Install Claude Code and log in (automatic), or\n  \
              • Save your token to ~/.config/cspy/token\n\n\
              Keychain error: {stderr}"
@@ -196,5 +292,37 @@ mod tests {
         let debug_str = format!("{:?}", oauth);
         assert!(debug_str.contains("[REDACTED]"), "debug should redact token");
         assert!(!debug_str.contains("super-secret"), "debug must NOT contain the actual token");
+    }
+
+    #[test]
+    fn reads_anthropic_token_from_keys_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".config/cspy");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("keys.json"),
+            r#"{"anthropic":{"oauth_token":" sk-ant-oat01-from-keys "}}"#,
+        )
+        .unwrap();
+
+        let token = read_anthropic_token_from_keys_file_from(tmp.path());
+        assert_eq!(token, Some("sk-ant-oat01-from-keys".to_string()));
+    }
+
+    #[test]
+    fn reads_factory_settings_from_keys_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".config/cspy");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("keys.json"),
+            r#"{"factory":{"api_key":" fk-test-123 ","monthly_cap_tokens":25000000}}"#,
+        )
+        .unwrap();
+
+        let keys = read_keys_file_from(tmp.path()).unwrap();
+        let factory = keys.factory.unwrap();
+        assert_eq!(normalize_opt(factory.api_key), Some("fk-test-123".to_string()));
+        assert_eq!(factory.monthly_cap_tokens, Some(25_000_000));
     }
 }
