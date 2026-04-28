@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
+		"build:app": "cargo tauri build --bundles app --config src-tauri/tauri.local.conf.json",
 		"build:preview": "vite build --mode preview",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

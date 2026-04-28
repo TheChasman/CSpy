@@ -1,9 +1,5 @@
 {
   "anthropic": {
     "oauth_token": "sk-ant-oat01-your-anthropic-oauth-token"
-  },
-  "factory": {
-    "api_key": "fk-your-factory-api-key",
-    "monthly_cap_tokens": 20000000
   }
 }

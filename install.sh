@@ -18,9 +18,11 @@ APP_DST="${INSTALL_DIR}/${APP_NAME}"
 # ── Pre-flight checks ────────────────────────────────────────
 
 if [[ ! -d "${APP_SRC}" ]]; then
-    echo "ERROR: ${APP_SRC} not found. Run 'cargo tauri build' first."
-    exit 1
+    echo "${APP_SRC} not found. Building local app bundle..."
+    (cd "${SCRIPT_DIR}" && npm run build:app)
 fi
+
+APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${APP_SRC}/Contents/Info.plist")"
 
 # ── Install app bundle ────────────────────────────────────────
 
@@ -44,7 +46,7 @@ cat > "${PLIST_PATH}" <<PLIST
     <key>Label</key>
     <string>${LABEL}</string>
     <key>Program</key>
-    <string>${APP_DST}/Contents/MacOS/CSpy</string>
+    <string>${APP_DST}/Contents/MacOS/${APP_EXECUTABLE}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

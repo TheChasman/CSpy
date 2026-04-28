@@ -137,32 +137,6 @@
 				</div>
 			</section>
 
-			<section class="bucket">
-				<div class="bucket-header">
-					<span class="bucket-label">Factory month</span>
-					{#if usage.factory_month}
-						<span class="mono {tier(usage.factory_month.utilisation)}">
-							{pct(usage.factory_month.utilisation)}
-						</span>
-					{:else}
-						<span class="mono dim">—</span>
-					{/if}
-				</div>
-				<div class="bar-track">
-					<div
-						class="bar-fill {tier(usage.factory_month?.utilisation ?? 0)}"
-						style="width: {pct(usage.factory_month?.utilisation ?? 0)}"
-					></div>
-				</div>
-				<div class="bucket-footer dim mono">
-					{#if usage.factory_month}
-						Month-to-date usage
-					{:else}
-						Unavailable — check Factory key/permissions
-					{/if}
-				</div>
-			</section>
-
 			<!-- Burn rate indicator -->
 			<section class="burn-rate">
 				<div class="burn-rate-label">Burn rate</div>

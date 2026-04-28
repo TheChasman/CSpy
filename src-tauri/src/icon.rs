@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::image::Image;
 
-pub(crate) const BAR_WIDTH: u32 = 32;
+pub(crate) const BAR_WIDTH: u32 = 72;
 pub(crate) const ICON_HEIGHT: u32 = 40; // 20pt at 2x Retina
 
 /// Cache of rendered icon buffers, keyed by quantised utilisation (0–20 = 5% steps).
@@ -22,7 +22,6 @@ const GLYPH_7: [u8; 7] = [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 
 const GLYPH_8: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110];
 const GLYPH_9: [u8; 7] = [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110];
 const GLYPH_COLON: [u8; 7] = [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000];
-const GLYPH_PERCENT: [u8; 7] = [0b11001, 0b11010, 0b00100, 0b00100, 0b01011, 0b10011, 0b00000];
 
 /// Return the 5x7 glyph for a character, or None for space/unknown.
 fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
@@ -38,7 +37,6 @@ fn glyph_for_char(ch: char) -> Option<&'static [u8; 7]> {
         '8' => Some(&GLYPH_8),
         '9' => Some(&GLYPH_9),
         ':' => Some(&GLYPH_COLON),
-        '%' => Some(&GLYPH_PERCENT),
         ' ' => None,
         _ => None,
     }
@@ -54,8 +52,6 @@ const CHAR_GAP: u32 = 1;
 const SPACE_WIDTH: u32 = 6;
 /// Gap between bar and text in pixels.
 const TEXT_GAP: u32 = 4;
-/// Gap between the first text block and secondary bar segment.
-const SEGMENT_GAP: u32 = 4;
 /// Trailing padding after text in pixels.
 const TRAIL_PAD: u32 = 2;
 /// Text colour: light grey, fully opaque.
@@ -145,34 +141,50 @@ fn bar_fill_colour(quantised_util: f64) -> (u8, u8, u8) {
 }
 
 fn render_bar_into(rgba: &mut [u8], row_width: u32, x_offset: u32, quantised_util: f64) {
-    const BORDER: u32 = 2;
-    const PADDING: u32 = 4;
-    let fill_color = bar_fill_colour(quantised_util);
-    let outline_color: (u8, u8, u8) = (60, 60, 60);
+    const MARKER_COUNT: u32 = 5;
+    const MARKER_RADIUS: i32 = 6;
+    const MARKER_INNER_RADIUS: i32 = 3;
+    const MARKER_DIAMETER: u32 = (MARKER_RADIUS as u32) * 2;
+    const MARKER_GAP: u32 = 2;
+    const LEFT_PAD: u32 = 2;
+    const CENTRE_Y: i32 = (ICON_HEIGHT / 2) as i32;
 
-    let inner_left = BORDER;
-    let inner_right = BAR_WIDTH - BORDER;
-    let inner_top = PADDING;
-    let inner_bottom = ICON_HEIGHT - PADDING;
-    let inner_width = inner_right - inner_left - 2 * BORDER;
-    let fill_width = ((inner_width as f64 * quantised_util) as u32).min(inner_width);
+    let fill_color = bar_fill_colour(quantised_util);
+    let outline_color: (u8, u8, u8) = (190, 190, 190);
+    let filled_markers = if quantised_util <= 0.0 {
+        0
+    } else {
+        (quantised_util * MARKER_COUNT as f64).ceil() as u32
+    }
+    .min(MARKER_COUNT);
 
     for y in 0..ICON_HEIGHT {
         for lx in 0..BAR_WIDTH {
             let x = x_offset + lx;
             let pixel_idx = ((y * row_width + x) * 4) as usize;
-            let (r, g, b, a) = if y < inner_top || y >= inner_bottom {
-                (0, 0, 0, 0)
-            } else if lx < inner_left + BORDER || lx >= inner_right - BORDER
-                || y < inner_top + BORDER || y >= inner_bottom - BORDER {
-                (outline_color.0, outline_color.1, outline_color.2, 255)
-            } else {
-                let inner_x = lx - inner_left - BORDER;
-                if inner_x < fill_width {
+
+            let marker_idx = (0..MARKER_COUNT).find(|idx| {
+                let left = LEFT_PAD + idx * (MARKER_DIAMETER + MARKER_GAP);
+                lx >= left && lx < left + MARKER_DIAMETER
+            });
+
+            let (r, g, b, a) = if let Some(idx) = marker_idx {
+                let left = LEFT_PAD + idx * (MARKER_DIAMETER + MARKER_GAP);
+                let centre_x = left as i32 + MARKER_RADIUS;
+                let dx = lx as i32 - centre_x;
+                let dy = y as i32 - CENTRE_Y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > MARKER_RADIUS * MARKER_RADIUS {
+                    (0, 0, 0, 0)
+                } else if idx < filled_markers {
                     (fill_color.0, fill_color.1, fill_color.2, 255)
+                } else if dist_sq >= MARKER_INNER_RADIUS * MARKER_INNER_RADIUS {
+                    (outline_color.0, outline_color.1, outline_color.2, 235)
                 } else {
-                    (180, 180, 180, 80)
+                    (0, 0, 0, 0)
                 }
+            } else {
+                (0, 0, 0, 0)
             };
             rgba[pixel_idx] = r;
             rgba[pixel_idx + 1] = g;
@@ -186,51 +198,18 @@ fn render_bar_into(rgba: &mut [u8], row_width: u32, x_offset: u32, quantised_uti
 /// Width is `BAR_WIDTH` when no countdown text is given, or wider to fit text.
 /// Pure function — no caching, no tauri dependency. Used directly by tests.
 pub(crate) fn render_icon_rgba(quantised_util: f64, countdown: Option<&str>) -> Vec<u8> {
-    render_icon_rgba_dual(quantised_util, countdown, None, None)
-}
-
-pub(crate) fn render_icon_rgba_dual(
-    primary_util: f64,
-    primary_text: Option<&str>,
-    secondary_util: Option<f64>,
-    secondary_text: Option<&str>,
-) -> Vec<u8> {
-    let primary_tw = primary_text.map(text_pixel_width).unwrap_or(0);
-    let secondary_tw = secondary_text.map(text_pixel_width).unwrap_or(0);
-    let has_secondary = secondary_util.is_some();
-
+    let tw = countdown.map(text_pixel_width).unwrap_or(0);
     let mut total_width = BAR_WIDTH;
-    if primary_tw > 0 {
-        total_width += TEXT_GAP + primary_tw;
-    }
-    if has_secondary {
-        total_width += SEGMENT_GAP + BAR_WIDTH;
-        if secondary_tw > 0 {
-            total_width += TEXT_GAP + secondary_tw;
-        }
-    }
-    if primary_tw > 0 || has_secondary {
+    if tw > 0 {
+        total_width += TEXT_GAP + tw;
         total_width += TRAIL_PAD;
     }
 
     let mut rgba = vec![0u8; (total_width * ICON_HEIGHT * 4) as usize];
-    render_bar_into(&mut rgba, total_width, 0, primary_util.clamp(0.0, 1.0));
+    render_bar_into(&mut rgba, total_width, 0, quantised_util.clamp(0.0, 1.0));
 
-    let mut cursor = BAR_WIDTH;
-    if let Some(text) = primary_text {
-        cursor += TEXT_GAP;
-        render_text_into(&mut rgba, total_width, cursor, text, TEXT_COLOUR);
-        cursor += primary_tw;
-    }
-
-    if let Some(sec_util) = secondary_util {
-        cursor += SEGMENT_GAP;
-        render_bar_into(&mut rgba, total_width, cursor, sec_util.clamp(0.0, 1.0));
-        cursor += BAR_WIDTH;
-        if let Some(text) = secondary_text {
-            cursor += TEXT_GAP;
-            render_text_into(&mut rgba, total_width, cursor, text, TEXT_COLOUR);
-        }
+    if let Some(text) = countdown {
+        render_text_into(&mut rgba, total_width, BAR_WIDTH + TEXT_GAP, text, TEXT_COLOUR);
     }
 
     rgba
@@ -269,30 +248,6 @@ pub fn generate_usage_icon(utilisation: f64, countdown: Option<&str>) -> Image<'
     Image::new(rgba_static, total_width, ICON_HEIGHT)
 }
 
-/// Generate a dual-bar tray icon: primary (Anthropic) + optional secondary (Factory).
-pub fn generate_usage_icon_dual(
-    primary_util: f64,
-    primary_text: Option<&str>,
-    secondary_util: Option<f64>,
-    secondary_text: Option<&str>,
-) -> Image<'static> {
-    if secondary_util.is_none() {
-        return generate_usage_icon(primary_util, primary_text);
-    }
-
-    let key = (primary_util.clamp(0.0, 1.0) * 20.0).round() as u8;
-    let quantised_primary = key as f64 / 20.0;
-    let rgba = render_icon_rgba_dual(
-        quantised_primary,
-        primary_text,
-        secondary_util,
-        secondary_text,
-    );
-    let total_width = (rgba.len() as u32) / (ICON_HEIGHT * 4);
-    let rgba_static: &'static [u8] = Box::leak(rgba.into_boxed_slice());
-    Image::new(rgba_static, total_width, ICON_HEIGHT)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,8 +259,8 @@ mod tests {
 
     fn count_interior_pixels_with_rgb(rgba: &[u8], rgb: (u8, u8, u8), row_width: u32) -> u32 {
         let mut count = 0;
-        for y in 6..26 {
-            for x in 4..28 {
+        for y in 0..ICON_HEIGHT {
+            for x in 0..BAR_WIDTH {
                 let (r, g, b, _) = pixel_at(rgba, x, y, row_width);
                 if (r, g, b) == rgb {
                     count += 1;
@@ -316,9 +271,19 @@ mod tests {
     }
 
     #[test]
-    fn dimensions_are_32x40() {
+    fn dimensions_are_bar_width_by_40() {
         let rgba = render_icon_rgba(0.5, None);
-        assert_eq!(rgba.len(), (32 * 40 * 4) as usize);
+        assert_eq!(rgba.len(), (BAR_WIDTH * ICON_HEIGHT * 4) as usize);
+    }
+
+    #[test]
+    fn fifty_percent_fills_three_of_five_markers() {
+        let rgba = render_icon_rgba(0.5, None);
+        let green = count_interior_pixels_with_rgb(&rgba, (74, 222, 128), BAR_WIDTH);
+        let grey = count_interior_pixels_with_rgb(&rgba, (190, 190, 190), BAR_WIDTH);
+
+        assert!(green > grey, "50% should round up to three filled markers");
+        assert!(grey > 0, "50% should still leave two hollow markers");
     }
 
     #[test]
@@ -332,9 +297,9 @@ mod tests {
     fn fifty_percent_uses_green() {
         let rgba = render_icon_rgba(0.5, None);
         let green = count_interior_pixels_with_rgb(&rgba, (74, 222, 128), BAR_WIDTH);
-        let grey = count_interior_pixels_with_rgb(&rgba, (180, 180, 180), BAR_WIDTH);
+        let grey = count_interior_pixels_with_rgb(&rgba, (190, 190, 190), BAR_WIDTH);
         assert!(green > 0, "50% should have green fill pixels");
-        assert!(grey > 0, "50% should have empty grey pixels too");
+        assert!(grey > 0, "50% should have hollow marker pixels too");
     }
 
     #[test]
@@ -398,7 +363,7 @@ mod tests {
 
     #[test]
     fn glyph_coverage_all_countdown_chars() {
-        for ch in "0123456789:% ".chars() {
+        for ch in "0123456789: ".chars() {
             assert!(
                 glyph_for_char(ch).is_some() || ch == ' ',
                 "missing glyph for '{ch}'"
@@ -408,7 +373,7 @@ mod tests {
 
     #[test]
     fn glyphs_are_5x7() {
-        for ch in "0123456789:%".chars() {
+        for ch in "0123456789:".chars() {
             let glyph = glyph_for_char(ch).unwrap();
             assert_eq!(glyph.len(), 7, "glyph for '{ch}' should have 7 rows");
             for (row_idx, row) in glyph.iter().enumerate() {
